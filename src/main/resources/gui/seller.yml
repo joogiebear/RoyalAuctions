@@ -1,7 +1,7 @@
-# Manage Auctions: your active listings. Right-click a listing to cancel (blocked once it has bids).
-# Placeholders: %count% %page% %pages%
+# A single seller's auctions — the /ah <username> view.
+# Placeholders: %seller% %count% %page% %pages%
 
-title: "&8Auction House &7» &fManage Auctions"
+title: "&8Auctions &7» &f%seller%"
 rows: 6
 
 mask:
@@ -39,9 +39,9 @@ slots:
       - id: ah_hub
 
   - id: info
-    item: writable_book hide_attributes name:"&eYour Listings"
+    item: player_head name:"&e%seller%'s Auctions"
     lore:
-      - "&7Active: &f%count%"
+      - "&7Listings: &f%count%"
       - "&7Page: &f%page%/%pages%"
     location:
       row: 6

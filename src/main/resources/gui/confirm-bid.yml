@@ -1,6 +1,7 @@
-# Confirm Auction (final review before posting). Placeholders: %type% %price% %duration% %fee%
+# Confirm Bid. Shown before a bid is placed (disable with confirmations.bid: false in config.yml).
+# Placeholders: %bid% %current_bid% %seller% %balance%
 
-title: "&8Confirm Auction"
+title: "&8Confirm Bid"
 rows: 3
 
 mask:
@@ -21,19 +22,24 @@ slots:
     left-click: []
 
   - id: confirm
-    item: lime_stained_glass_pane name:"&aConfirm Auction"
+    item: lime_stained_glass_pane name:"&aConfirm Bid"
     lore:
-      - "&7Post it and pay the &c%fee% &7fee"
+      - "&7Bid &e%bid%"
+      - ""
+      - "&7Your balance: &f%balance%"
+      - ""
+      - "&8Your money is held until you are"
+      - "&8outbid or the auction ends."
     location:
       row: 2
       column: 3
     left-click:
-      - id: ah_confirm
+      - id: ah_confirm_bid
 
   - id: cancel
     item: red_stained_glass_pane name:"&cBack"
     lore:
-      - "&7Return to editing"
+      - "&7Return without bidding."
     location:
       row: 2
       column: 7

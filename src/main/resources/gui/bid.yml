@@ -1,34 +1,51 @@
-# Place Bid. Placeholders: {min_bid} {current_bid} {seller}
+# Place Bid. Placeholders: %min_bid% %current_bid% %seller%
+
 title: "&8Place Bid"
 rows: 3
-filler:
-  enabled: true
-  material: GRAY_STAINED_GLASS_PANE
-  name: " "
-items:
-  item:
-    slot: 14
-    material: PAPER
-    name: "&fItem"
-    action: NONE
-  bid-min:
-    slot: 12
-    material: LIME_STAINED_GLASS_PANE
-    name: "&aBid {min_bid}"
+
+mask:
+  items:
+    - gray_stained_glass_pane
+  pattern:
+    - "111111111"
+    - "111111111"
+    - "111111111"
+
+slots:
+  - id: item
+    item: paper name:"&fItem"
+    lore: []
+    location:
+      row: 2
+      column: 5
+    left-click: []
+
+  - id: bid-min
+    item: lime_stained_glass_pane name:"&aBid %min_bid%"
     lore:
       - "&7The minimum next bid"
-    action: BID_MIN
-  bid-custom:
-    slot: 16
-    material: OAK_SIGN
-    name: "&eCustom Amount"
+    location:
+      row: 2
+      column: 3
+    left-click:
+      - id: ah_bid_min
+
+  - id: bid-custom
+    item: oak_sign name:"&eCustom Amount"
     lore:
       - "&7Type your own bid in chat"
-    action: BID_CUSTOM
-  back:
-    slot: 23
-    material: OAK_DOOR
-    name: "&eBack"
+    location:
+      row: 2
+      column: 7
+    left-click:
+      - id: ah_bid_custom
+
+  - id: back
+    item: oak_door name:"&eBack"
     lore:
       - "&7Return to the Auction House"
-    action: OPEN_BROWSE
+    location:
+      row: 3
+      column: 5
+    left-click:
+      - id: ah_browse

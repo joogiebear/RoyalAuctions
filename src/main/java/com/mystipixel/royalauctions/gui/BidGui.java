@@ -69,8 +69,7 @@ public final class BidGui extends AuctionGui {
         }
         Player player = (Player) event.getWhoClicked();
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
-            case BID_MIN -> manager.service().placeBid(player, listing, minBid,
-                    () -> manager.openBrowse(player, category, search, sort, page));
+            case BID_MIN -> manager.confirmBid(player, listing, minBid, category, search, sort, page);
             case BID_CUSTOM -> manager.beginBidInput(player, listing, category, search, sort, page);
             case OPEN_BROWSE, BACK -> manager.openBrowse(player, category, search, sort, page);
             default -> {

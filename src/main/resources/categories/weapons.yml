@@ -1,0 +1,18 @@
+# Category id = this file name (weapons).
+# Rendered in column 1 of the browser, ordered by `priority` (lowest first).
+
+display-name: "&cWeapons"
+icon: DIAMOND_SWORD
+priority: 10
+
+match:
+  # `items:` pins exact items to this category and BEATS every other rule, in any category,
+  # at any priority. Accepts eco ids AND vanilla (e.g. "minecraft:trident").
+  # Use it whenever an item's BASE MATERIAL would send it to the wrong place - e.g. a custom
+  # sword built on a STICK would otherwise land in Tools & Misc.
+  items: []
+  #  - "ecoitems:brazen_sword"
+
+  material-suffixes: ["_SWORD", "_AXE"]
+  materials: ["BOW", "CROSSBOW", "TRIDENT", "MACE"]
+  tags: ["WEAPON"]

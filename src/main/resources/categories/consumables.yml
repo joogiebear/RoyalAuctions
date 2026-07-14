@@ -1,0 +1,8 @@
+display-name: "&aConsumables"
+icon: GOLDEN_APPLE
+priority: 40
+
+match:
+  items: []
+  materials: ["POTION", "SPLASH_POTION", "LINGERING_POTION", "EXPERIENCE_BOTTLE"]
+  tags: ["EDIBLE"]

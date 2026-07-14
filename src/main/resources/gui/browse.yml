@@ -1,107 +1,159 @@
-# Auction Browser. Slots are 1-based (top-left = 1).
-# Placeholders: {category} {count} {page} {pages} {search} {sort}
-title: "&8Auction House"
+# Auction Browser.
+#
+# Layout:
+#   column 1 (A) = category buttons, top to bottom, from config.yml `categories` (priority order)
+#   column 2     = a glass divider — each row is its own mask item, so every category can have
+#                  its own colour (just swap the material in mask.items below)
+#   columns 3-9  = the listings grid (rows 1-5)
+#   row 6        = search / back / sort / tier / type filters + paging
+#
+# Placeholders: %category% %count% %page% %pages% %search% %sort% %tier% %type%
+
+title: "&8Auction Browser"
 rows: 6
-filler:
-  enabled: true
-  material: GRAY_STAINED_GLASS_PANE
-  name: " "
+
+mask:
+  items:
+    - red_stained_glass_pane        # 1 - Weapons divider
+    - blue_stained_glass_pane       # 2 - Armor
+    - purple_stained_glass_pane     # 3 - Accessories
+    - lime_stained_glass_pane       # 4 - Consumables
+    - green_stained_glass_pane      # 5 - Blocks
+    - orange_stained_glass_pane     # 6 - Tools & Misc
+    - black_stained_glass_pane      # 7 - bottom bar
+  pattern:
+    - "A10000000"
+    - "A20000000"
+    - "A30000000"
+    - "A40000000"
+    - "A50000000"
+    - "A67777777"
+
+regions:
+  category-slots: "A"    # column 1, rows 1-6 — filled from config.yml categories
+  content-slots: "0"     # columns 3-9, rows 1-5 — 35 listings per page
+
+slots:
+  - id: prev
+    item: arrow name:"&ePrevious Page"
+    lore:
+      - "&7Page %page%/%pages%"
+    location:
+      row: 6
+      column: 3
+    left-click:
+      - id: ah_prev_page
+
+  - id: search
+    item: oak_sign name:"&eSearch"
+    lore:
+      - "&7Current: &f%search%"
+      - ""
+      - "&eClick to search by name"
+    location:
+      row: 6
+      column: 4
+    left-click:
+      - id: ah_search
+
+  - id: back
+    item: arrow name:"&eBack"
+    lore:
+      - "&7Return to the Auction House menu."
+    location:
+      row: 6
+      column: 5
+    left-click:
+      - id: ah_hub
+
+  - id: sort
+    # Quoted: the inline spec contains a colon+space, which bare YAML would read as a mapping.
+    item: 'hopper name:"&eSort: &f%sort%"'
+    lore:
+      - "&7Click to change sorting."
+    location:
+      row: 6
+      column: 6
+    left-click:
+      - id: ah_sort
+
+  - id: tier
+    # Item tiers are eco's rarities (plugins/EcoItems/rarities/) and cover the whole eco
+    # suite - a rarity's items: list can claim talismans:, ecoarmor:, reforges:, ecopets: ...
+    #
+    # %tier_list% is a LIST placeholder: a lore line that is exactly %tier_list% expands into
+    # one line per tier, with the selected one marked. Left-click steps up the list,
+    # right-click steps down (swap the two effect ids below to reverse that).
+    item: 'nether_star hide_attributes name:"&eItem Tier"'
+    lore:
+      - "&7Filter listings by item tier."
+      - ""
+      - "%tier_list%"
+      - ""
+      - "&eLeft-click &7to go up"
+      - "&eRight-click &7to go down"
+    location:
+      row: 6
+      column: 7
+    left-click:
+      - id: ah_tier_prev
+    right-click:
+      - id: ah_tier_next
+
+  - id: type
+    item: 'gold_ingot hide_attributes name:"&eListing Type"'
+    lore:
+      - "&7Show everything, Buy-It-Now"
+      - "&7only, or auctions only."
+      - ""
+      - "%type_list%"
+      - ""
+      - "&eLeft-click &7to go up"
+      - "&eRight-click &7to go down"
+    location:
+      row: 6
+      column: 8
+    left-click:
+      - id: ah_type_prev
+    right-click:
+      - id: ah_type_next
+
+  - id: next
+    item: arrow name:"&eNext Page"
+    lore:
+      - "&7Page %page%/%pages%"
+    location:
+      row: 6
+      column: 9
+    left-click:
+      - id: ah_next_page
+
 sounds:
   open:
     enabled: true
     name: UI_BUTTON_CLICK
     volume: 0.6
     pitch: 1.2
-items:
-  search:
-    slot: 1
-    material: OAK_SIGN
-    name: "&eSearch"
-    lore:
-      - "&7Current: &f{search}"
-      - "&7Click to search by name"
-    action: SEARCH
-  sort:
-    slot: 2
-    material: HOPPER
-    name: "&eSort: &f{sort}"
-    lore:
-      - "&7Click to change sorting"
-    action: SORT
-  create:
-    slot: 3
-    material: ANVIL
-    name: "&aCreate Auction"
-    lore:
-      - "&7List an item for sale or auction"
-    action: CREATE_AUCTION
-  prev:
-    slot: 4
-    material: ARROW
-    name: "&ePrevious Page"
-    lore:
-      - "&7Page {page}/{pages}"
-    action: PREV_PAGE
-  info:
-    slot: 5
-    material: PAPER
-    name: "&6Auction House"
-    lore:
-      - "&7Category: &f{category}"
-      - "&7Listings: &f{count}"
-      - "&7Page: &f{page}/{pages}"
-      - ""
-      - "&7Click to clear filters"
-    action: CLEAR_FILTERS
-  next:
-    slot: 6
-    material: ARROW
-    name: "&eNext Page"
-    lore:
-      - "&7Page {page}/{pages}"
-    action: NEXT_PAGE
-  manage:
-    slot: 7
-    material: WRITABLE_BOOK
-    name: "&eManage Auctions"
-    lore:
-      - "&7View and cancel your listings"
-    action: OPEN_MANAGE
-  collection:
-    slot: 8
-    material: ENDER_CHEST
-    name: "&eCollection"
-    lore:
-      - "&7Claim purchases and returned items"
-    action: OPEN_COLLECTION
-  close:
-    slot: 9
-    material: BARRIER
-    name: "&cClose"
-    action: CLOSE
-# Where listings are shown (rows 2-5) and the category tabs (row 6).
-content-slots: [10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45]
-category-slots: [46,47,48,49,50,51,52,53,54]
 
 # Lines appended BELOW each listing's own item lore (Hypixel-style).
-# Placeholders: {seller} {price} {starting_price} {bids} {top_bidder}
-#               {ends_in} {bid_label} {click_hint}
+# Placeholders: %seller% %price% %starting_price% %bids% %top_bidder%
+#               %ends_in% %bid_label% %tier% %click_hint%
 listing-lore:
   buy-it-now:
     - ""
-    - "&7Seller: &f{seller}"
-    - "&6Buy it now: &e{price} coins"
+    - "&7Seller: &f%seller%"
+    - "&6Buy it now: &e%price% coins"
     - ""
-    - "&7Ends in: &f{ends_in}"
+    - "&7Ends in: &f%ends_in%"
     - ""
-    - "{click_hint}"
+    - "%click_hint%"
   auction:
     - ""
-    - "&7Seller: &f{seller}"
-    - "&6{bid_label}: &e{price} coins"
-    - "&7Top bidder: &f{top_bidder}"
-    - "&7Bids: &f{bids}"
+    - "&7Seller: &f%seller%"
+    - "&6%bid_label%: &e%price% coins"
+    - "&7Top bidder: &f%top_bidder%"
+    - "&7Bids: &f%bids%"
     - ""
-    - "&7Ends in: &f{ends_in}"
+    - "&7Ends in: &f%ends_in%"
     - ""
-    - "{click_hint}"
+    - "%click_hint%"

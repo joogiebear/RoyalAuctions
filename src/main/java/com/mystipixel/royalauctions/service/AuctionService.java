@@ -37,18 +37,21 @@ public final class AuctionService {
     private final VaultHook vault;
     private final PluginConfig config;
     private final CategoryManager categories;
+    private final com.mystipixel.royalauctions.tier.TierManager tiers;
     private final MessageManager messages;
 
     /** Cheap cached count for placeholders; refreshed by the expiry sweep and on demand. */
     private volatile int activeCache = 0;
 
     public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
-                          CategoryManager categories, MessageManager messages) {
+                          CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
+                          MessageManager messages) {
         this.plugin = plugin;
         this.db = db;
         this.vault = vault;
         this.config = config;
         this.categories = categories;
+        this.tiers = tiers;
         this.messages = messages;
     }
 
@@ -127,10 +130,11 @@ public final class AuctionService {
         }
 
         String category = categories.categorize(item);
+        String tier = tiers.tierOf(item); // resolved once, at creation — browsing never recomputes it
         String displayName = displayNameOf(item);
         long now = System.currentTimeMillis();
         Listing listing = new Listing(UUID.randomUUID(), seller.getUniqueId(), seller.getName(),
-                ItemSerialization.serialize(item), displayName, category, type, price,
+                ItemSerialization.serialize(item), displayName, category, tier, type, price,
                 now, now + durationMillis, ListingStatus.ACTIVE, 0, null, null, 0);
 
         async(() -> {
@@ -380,12 +384,39 @@ public final class AuctionService {
         async(() -> {
             try {
                 List<Listing> list = db.activeListings();
+                repairStaleCategories(list);
                 sync(() -> callback.accept(list));
             } catch (Exception e) {
                 logError("loading listings", e);
                 sync(() -> callback.accept(List.of()));
             }
         });
+    }
+
+    /**
+     * A listing's category is stamped when it's created, so renaming a category in config would
+     * otherwise strand every existing listing under an id no button matches — visible in "All", but
+     * in no category. Re-derive those from the item and persist the fix, once.
+     */
+    private void repairStaleCategories(List<Listing> listings) {
+        int repaired = 0;
+        for (Listing l : listings) {
+            if (categories.isKnown(l.category())) {
+                continue;
+            }
+            String fresh = categories.categorize(l.item());
+            l.category(fresh);
+            try {
+                db.updateCategory(l.id(), fresh);
+                repaired++;
+            } catch (Exception e) {
+                logError("repairing category for listing " + l.id(), e);
+            }
+        }
+        if (repaired > 0) {
+            plugin.getLogger().info("Re-categorised " + repaired
+                    + " listing(s) whose category no longer exists.");
+        }
     }
 
     public void loadSellerListings(UUID sellerId, Consumer<List<Listing>> callback) {
@@ -395,6 +426,19 @@ public final class AuctionService {
                 sync(() -> callback.accept(list));
             } catch (Exception e) {
                 logError("loading seller listings", e);
+                sync(() -> callback.accept(List.of()));
+            }
+        });
+    }
+
+    /** Active auctions this player has bid on (winning or outbid) — backs the View Bids menu. */
+    public void loadBidListings(UUID bidderId, Consumer<List<Listing>> callback) {
+        async(() -> {
+            try {
+                List<Listing> list = db.activeListingsBidOnBy(bidderId);
+                sync(() -> callback.accept(list));
+            } catch (Exception e) {
+                logError("loading bid listings", e);
                 sync(() -> callback.accept(List.of()));
             }
         });

@@ -1,5 +1,6 @@
 package com.mystipixel.royalauctions.gui.menu;
 
+import com.mystipixel.royalauctions.hooks.EcoHook;
 import com.mystipixel.royalauctions.util.Text;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Material;
@@ -21,123 +22,234 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * A single menu loaded from a {@code gui/*.yml} file: title, size, filler, sounds, the configured
- * buttons (each with a slot, material, name, lore and {@link MenuAction}) and any named slot lists
- * used for dynamic content (e.g. {@code content-slots}, {@code category-slots}). Slots in the file
- * are 1-based (like RoyalBank); they are converted to 0-based indices here.
+ * A menu loaded from a {@code gui/*.yml} file, authored in the EcoMenus dialect:
+ *
+ * <pre>
+ * title: "&amp;8Auction House"
+ * rows: 6
+ * mask:
+ *   items:
+ *     - gray_stained_glass_pane
+ *   pattern:
+ *     - "111111111"
+ *     - "000000000"     # 0 / letters = dynamic regions, left empty for the GUI to fill
+ *     - "CCCCCCCCC"
+ * regions:
+ *   content-slots: "0"
+ *   category-slots: "C"
+ * slots:
+ *   - id: search
+ *     item: oak_sign name:"&amp;eSearch"
+ *     lore: [ "&amp;7Current: &amp;f%search%" ]
+ *     location:
+ *       row: 1
+ *       column: 1
+ *     left-click:
+ *       - id: ah_search
+ * </pre>
+ *
+ * Positions are 1-based {@code row}/{@code column} (converted to 0-based indices here). Click effects
+ * are authored as {@code id:}s and mapped onto {@link MenuAction}, which is stamped on the rendered
+ * item's PDC so the GUI classes can switch on it. Placeholders are {@code %percent%} style.
  */
 public final class MenuTemplate {
 
-    /** One configured button. Material/name/lore may contain {placeholders}. */
-    public record ConfiguredItem(int slot, String material, String name, List<String> lore, MenuAction action) {
+    /**
+     * One hand-placed slot from the {@code slots:} list. {@code left}/{@code right} come from the
+     * {@code left-click:} / {@code right-click:} effect lists; when a slot declares no right-click
+     * effects, right simply mirrors left (so buttons that don't care about the click type are
+     * unaffected).
+     */
+    private record ConfiguredSlot(String id, int index, ItemSpec item, List<String> lore,
+                                  MenuAction left, MenuAction right) {
     }
 
     private final String title;
     private final int rows;
-    private final ItemStack filler; // null when disabled
-    private final Map<String, ConfiguredItem> items;
-    private final Map<String, List<Integer>> slotLists;
+    private final ItemStack[] mask;                      // per-index filler (null = dynamic region / empty)
+    private final Map<String, List<Integer>> regions;    // region name -> indices
+    private final Map<String, ConfiguredSlot> slots;     // slot id -> slot (unnamed slots get synthetic ids)
     private final FileConfiguration source;
 
-    private MenuTemplate(String title, int rows, ItemStack filler, Map<String, ConfiguredItem> items,
-                         Map<String, List<Integer>> slotLists, FileConfiguration source) {
+    private MenuTemplate(String title, int rows, ItemStack[] mask, Map<String, List<Integer>> regions,
+                         Map<String, ConfiguredSlot> slots, FileConfiguration source) {
         this.title = title;
         this.rows = rows;
-        this.filler = filler;
-        this.items = items;
-        this.slotLists = slotLists;
+        this.mask = mask;
+        this.regions = regions;
+        this.slots = slots;
         this.source = source;
     }
+
+    // ------------------------------------------------------------------ loading
 
     public static MenuTemplate load(File file, String defaultTitle, int defaultRows) {
         FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
         String title = cfg.getString("title", defaultTitle);
         int rows = Math.max(1, Math.min(6, cfg.getInt("rows", defaultRows)));
+        int size = rows * 9;
 
-        ItemStack filler = null;
-        if (cfg.getBoolean("filler.enabled", true)) {
-            Material m = matchMaterial(cfg.getString("filler.material", "GRAY_STAINED_GLASS_PANE"));
-            filler = simpleItem(m, cfg.getString("filler.name", " "), cfg.getStringList("filler.lore"), MenuAction.NONE);
-        }
-
-        Map<String, ConfiguredItem> items = new LinkedHashMap<>();
-        ConfigurationSection itemsSec = cfg.getConfigurationSection("items");
-        if (itemsSec != null) {
-            for (String key : itemsSec.getKeys(false)) {
-                ConfigurationSection is = itemsSec.getConfigurationSection(key);
-                if (is == null) {
-                    continue;
+        // --- mask: filler materials + pattern ---
+        ItemStack[] mask = new ItemStack[size];
+        List<String> maskItems = cfg.getStringList("mask.items");
+        List<String> pattern = cfg.getStringList("mask.pattern");
+        Map<Character, List<Integer>> byChar = new LinkedHashMap<>();
+        for (int r = 0; r < pattern.size() && r < rows; r++) {
+            String line = pattern.get(r);
+            for (int c = 0; c < 9 && c < line.length(); c++) {
+                int index = r * 9 + c;
+                char ch = line.charAt(c);
+                byChar.computeIfAbsent(ch, k -> new ArrayList<>()).add(index);
+                if (ch >= '1' && ch <= '9') {
+                    int matIdx = ch - '1';
+                    if (matIdx < maskItems.size()) {
+                        mask[index] = filler(maskItems.get(matIdx));
+                    }
                 }
-                items.put(key, new ConfiguredItem(
-                        is.getInt("slot", 1) - 1,
-                        is.getString("material", "STONE"),
-                        is.getString("name", "&f"),
-                        is.getStringList("lore"),
-                        MenuAction.parse(is.getString("action", "NONE"))));
+                // '0' and letters stay null: dynamic regions the GUI fills at render time.
             }
         }
 
-        Map<String, List<Integer>> slotLists = new LinkedHashMap<>();
-        for (String listName : List.of("content-slots", "category-slots", "duration-slots")) {
-            List<Integer> raw = cfg.getIntegerList(listName);
-            if (!raw.isEmpty()) {
-                List<Integer> zeroBased = new ArrayList<>(raw.size());
-                for (int s : raw) {
-                    zeroBased.add(s - 1);
+        // --- regions: name -> the mask character that marks it ---
+        Map<String, List<Integer>> regions = new LinkedHashMap<>();
+        ConfigurationSection regionSec = cfg.getConfigurationSection("regions");
+        if (regionSec != null) {
+            for (String name : regionSec.getKeys(false)) {
+                String marker = regionSec.getString(name, "0");
+                if (marker != null && !marker.isEmpty()) {
+                    regions.put(name, byChar.getOrDefault(marker.charAt(0), List.of()));
                 }
-                slotLists.put(listName, zeroBased);
             }
         }
 
-        return new MenuTemplate(title, rows, filler, items, slotLists, cfg);
+        // --- slots: hand-placed buttons ---
+        Map<String, ConfiguredSlot> slots = new LinkedHashMap<>();
+        List<Map<?, ?>> rawSlots = cfg.getMapList("slots");
+        int synthetic = 0;
+        for (Map<?, ?> raw : rawSlots) {
+            Object itemObj = raw.get("item");
+            if (itemObj == null) {
+                continue;
+            }
+            int index = locationIndex(raw.get("location"), size);
+            if (index < 0) {
+                continue;
+            }
+            List<String> lore = new ArrayList<>();
+            if (raw.get("lore") instanceof List<?> list) {
+                for (Object o : list) {
+                    lore.add(String.valueOf(o));
+                }
+            }
+            MenuAction left = firstAction(raw.get("left-click"));
+            MenuAction right = firstAction(raw.get("right-click"));
+            if (left == MenuAction.NONE) {
+                left = right;                 // right-click-only button
+            }
+            if (right == MenuAction.NONE) {
+                right = left;                 // no separate right action: any click does the same thing
+            }
+            String id = raw.get("id") != null ? String.valueOf(raw.get("id")) : ("slot" + (synthetic++));
+            slots.put(id, new ConfiguredSlot(id, index, ItemSpec.parse(String.valueOf(itemObj)),
+                    lore, left, right));
+        }
+
+        return new MenuTemplate(title, rows, mask, regions, slots, cfg);
     }
 
-    // ------------------------------------------------------------------ rendering
+    /** The first recognised effect id in a click list becomes the slot's action. */
+    private static MenuAction firstAction(Object clickList) {
+        if (!(clickList instanceof List<?> list)) {
+            return MenuAction.NONE;
+        }
+        for (Object entry : list) {
+            if (entry instanceof Map<?, ?> m && m.get("id") != null) {
+                MenuAction action = MenuAction.fromEffectId(String.valueOf(m.get("id")));
+                if (action != MenuAction.NONE) {
+                    return action;
+                }
+            }
+        }
+        return MenuAction.NONE;
+    }
+
+    /** EcoMenus {@code location: {row, column}} (1-based) → 0-based inventory index. */
+    private static int locationIndex(Object locationObj, int size) {
+        int row = 1;
+        int column = 1;
+        if (locationObj instanceof ConfigurationSection cs) {
+            row = cs.getInt("row", 1);
+            column = cs.getInt("column", 1);
+        } else if (locationObj instanceof Map<?, ?> m) {
+            row = intOf(m.get("row"), 1);
+            column = intOf(m.get("column"), 1);
+        }
+        int index = (row - 1) * 9 + (column - 1);
+        return (index >= 0 && index < size) ? index : -1;
+    }
+
+    private static ItemStack filler(String lookup) {
+        EcoHook eco = EcoHookHolder.get();
+        ItemStack item = eco != null ? eco.resolve(lookup, 1) : new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(Text.color(" "));
+            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+            meta.getPersistentDataContainer().set(MenuKeys.ACTION, PersistentDataType.STRING, MenuAction.NONE.name());
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    // ------------------------------------------------------------------ rendering (API used by the GUIs)
 
     public int size() {
         return rows * 9;
     }
 
     public String title(Map<String, String> placeholders) {
-        return apply(title, placeholders);
+        return ItemSpec.apply(title, placeholders);
     }
 
-    /** Fill the filler and place every configured static button (with placeholders + action tags). */
+    /** Paint the mask filler, then place every configured button (placeholders + action tags applied). */
     public void applyStatic(Inventory inv, Map<String, String> placeholders) {
-        if (filler != null) {
-            for (int i = 0; i < inv.getSize(); i++) {
-                inv.setItem(i, filler.clone());
-            }
+        applyStatic(inv, placeholders, Map.of());
+    }
+
+    /**
+     * As {@link #applyStatic(Inventory, Map)}, but any lore line that is exactly {@code %key%} for a
+     * key in {@code listPlaceholders} expands into one line per entry — used by the filter buttons to
+     * print their full option list with the current selection marked.
+     */
+    public void applyStatic(Inventory inv, Map<String, String> placeholders,
+                            Map<String, List<String>> listPlaceholders) {
+        EcoHook eco = EcoHookHolder.get();
+        for (int i = 0; i < inv.getSize() && i < mask.length; i++) {
+            inv.setItem(i, mask[i] == null ? null : mask[i].clone());
         }
-        for (ConfiguredItem ci : items.values()) {
-            if (ci.slot() < 0 || ci.slot() >= inv.getSize()) {
+        for (ConfiguredSlot slot : slots.values()) {
+            if (slot.index() < 0 || slot.index() >= inv.getSize()) {
                 continue;
             }
-            inv.setItem(ci.slot(), build(ci, placeholders));
+            inv.setItem(slot.index(), slot.item().build(eco, placeholders, listPlaceholders,
+                    slot.lore(), slot.left(), slot.right()));
         }
     }
 
-    private ItemStack build(ConfiguredItem ci, Map<String, String> placeholders) {
-        Material material = matchMaterial(apply(ci.material(), placeholders));
-        List<String> lore = new ArrayList<>();
-        for (String line : ci.lore()) {
-            lore.add(apply(line, placeholders));
-        }
-        return simpleItem(material, apply(ci.name(), placeholders), lore, ci.action());
+    /** 0-based index of a named slot (its {@code id:} in the config), or -1. */
+    public int slotOf(String id) {
+        ConfiguredSlot slot = slots.get(id);
+        return slot == null ? -1 : slot.index();
     }
 
-    public int slotOf(String key) {
-        ConfiguredItem ci = items.get(key);
-        return ci == null ? -1 : ci.slot();
+    public MenuAction actionOf(String id) {
+        ConfiguredSlot slot = slots.get(id);
+        return slot == null ? MenuAction.NONE : slot.left();
     }
 
-    public MenuAction actionOf(String key) {
-        ConfiguredItem ci = items.get(key);
-        return ci == null ? MenuAction.NONE : ci.action();
-    }
-
-    public List<Integer> slots(String listName) {
-        return slotLists.getOrDefault(listName, List.of());
+    /** Indices of a named dynamic region from the mask (e.g. {@code content-slots}). */
+    public List<Integer> slots(String regionName) {
+        return regions.getOrDefault(regionName, List.of());
     }
 
     /** A configurable list of lore lines at {@code path} (e.g. "listing-lore.auction"), placeholders filled. */
@@ -145,7 +257,7 @@ public final class MenuTemplate {
         List<String> raw = source.getStringList(path);
         List<String> out = new ArrayList<>(raw.size());
         for (String line : raw) {
-            out.add(apply(line, placeholders));
+            out.add(ItemSpec.apply(line, placeholders));
         }
         return out;
     }
@@ -166,8 +278,9 @@ public final class MenuTemplate {
         player.playSound(player.getLocation(), sound, volume, pitch);
     }
 
-    // ------------------------------------------------------------------ helpers
+    // ------------------------------------------------------------------ static helpers (unchanged API)
 
+    /** Build a simple tagged item (used for dynamically-generated buttons, e.g. duration options). */
     public static ItemStack simpleItem(Material material, String name, List<String> lore, MenuAction action) {
         ItemStack item = new ItemStack(material == null || material.isAir() ? Material.STONE : material);
         ItemMeta meta = item.getItemMeta();
@@ -187,7 +300,7 @@ public final class MenuTemplate {
         return item;
     }
 
-    /** Stamp an action onto an existing item (used for dynamically-built buttons like the sell slot). */
+    /** Stamp an action onto an existing item (e.g. the deposited sell item). */
     public static ItemStack tag(ItemStack item, MenuAction action) {
         if (item == null) {
             return null;
@@ -200,7 +313,7 @@ public final class MenuTemplate {
         return item;
     }
 
-    /** Read the action tagged on a clicked item, or NONE. */
+    /** Read the (left-click) action tagged on a clicked item, or NONE. */
     public static MenuAction actionOf(ItemStack item) {
         if (item == null || !item.hasItemMeta()) {
             return MenuAction.NONE;
@@ -209,19 +322,48 @@ public final class MenuTemplate {
         return MenuAction.parse(raw);
     }
 
-    private static Material matchMaterial(String raw) {
-        Material m = Material.matchMaterial(raw == null ? "STONE" : raw);
-        return m == null ? Material.STONE : m;
+    /**
+     * Read the action for a specific click type. Buttons that declare no separate {@code right-click:}
+     * carry the same action on both keys, so this is safe for every menu — only the filter buttons
+     * actually differ between left and right.
+     */
+    public static MenuAction actionOf(ItemStack item, boolean rightClick) {
+        if (item == null || !item.hasItemMeta()) {
+            return MenuAction.NONE;
+        }
+        if (!rightClick) {
+            return actionOf(item);
+        }
+        String raw = item.getItemMeta().getPersistentDataContainer()
+                .get(MenuKeys.ACTION_RIGHT, PersistentDataType.STRING);
+        MenuAction right = MenuAction.parse(raw);
+        return right == MenuAction.NONE ? actionOf(item) : right;
     }
 
-    private static String apply(String input, Map<String, String> placeholders) {
-        if (input == null) {
-            return "";
+    private static int intOf(Object o, int def) {
+        if (o instanceof Number n) {
+            return n.intValue();
         }
-        String result = input;
-        for (Map.Entry<String, String> e : placeholders.entrySet()) {
-            result = result.replace("{" + e.getKey() + "}", e.getValue());
+        try {
+            return o == null ? def : Integer.parseInt(String.valueOf(o));
+        } catch (NumberFormatException e) {
+            return def;
         }
-        return result;
+    }
+
+    /** Holds the plugin's {@link EcoHook} so static template loading can resolve item lookups. */
+    public static final class EcoHookHolder {
+        private static EcoHook eco;
+
+        private EcoHookHolder() {
+        }
+
+        public static void set(EcoHook hook) {
+            eco = hook;
+        }
+
+        public static EcoHook get() {
+            return eco;
+        }
     }
 }

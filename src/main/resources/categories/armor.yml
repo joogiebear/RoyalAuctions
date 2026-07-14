@@ -1,0 +1,11 @@
+display-name: "&9Armor"
+icon: DIAMOND_CHESTPLATE
+priority: 20
+
+match:
+  items: []
+  # A whole eco plugin can map to one category:
+  eco-namespaces: ["ecoarmor"]
+  material-suffixes: ["_HELMET", "_CHESTPLATE", "_LEGGINGS", "_BOOTS"]
+  materials: ["ELYTRA", "SHIELD", "TURTLE_HELMET"]
+  tags: ["ARMOR"]

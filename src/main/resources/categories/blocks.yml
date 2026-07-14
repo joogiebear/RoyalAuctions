@@ -1,0 +1,7 @@
+display-name: "&2Blocks"
+icon: GRASS_BLOCK
+priority: 50
+
+match:
+  items: []
+  tags: ["BLOCK"]

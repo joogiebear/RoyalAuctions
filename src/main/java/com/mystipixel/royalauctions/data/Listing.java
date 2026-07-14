@@ -17,7 +17,8 @@ public final class Listing {
     private final String sellerName;
     private final byte[] itemData;
     private final String displayName;
-    private final String category;
+    private String category;        // re-derived if the configured categories are renamed
+    private final String tier;      // EcoItems rarity id, or null when the item has no tier
     private final ListingType type;
     private final double price;
     private final long createdAt;
@@ -32,7 +33,7 @@ public final class Listing {
     private transient ItemStack cachedItem;
 
     public Listing(UUID id, UUID sellerId, String sellerName, byte[] itemData, String displayName,
-                   String category, ListingType type, double price, long createdAt, long expiresAt,
+                   String category, String tier, ListingType type, double price, long createdAt, long expiresAt,
                    ListingStatus status, double currentBid, UUID topBidderId, String topBidderName, int bidCount) {
         this.id = id;
         this.sellerId = sellerId;
@@ -40,6 +41,7 @@ public final class Listing {
         this.itemData = itemData;
         this.displayName = displayName;
         this.category = category;
+        this.tier = tier;
         this.type = type;
         this.price = price;
         this.createdAt = createdAt;
@@ -73,6 +75,16 @@ public final class Listing {
 
     public String category() {
         return category;
+    }
+
+    /** Re-assign after a category rename (see AuctionService's stale-category repair). */
+    public void category(String category) {
+        this.category = category;
+    }
+
+    /** EcoItems rarity id (e.g. "epic"), or null when the item has no tier. */
+    public String tier() {
+        return tier;
     }
 
     public ListingType type() {

@@ -1,61 +1,88 @@
-# Create Auction. Placeholders: {price} {duration} {type_material} {type_name} {type_desc} {toggle_hint}
+# Create Auction.
+# Placeholders: %price% %duration% %type_material% %type_name% %type_desc% %toggle_hint%
+
 title: "&8Create Auction"
 rows: 5
-filler:
-  enabled: true
-  material: BLACK_STAINED_GLASS_PANE
-  name: " "
+
+mask:
+  items:
+    - black_stained_glass_pane
+  pattern:
+    - "111111111"
+    - "111101111"
+    - "111111111"
+    - "111111111"
+    - "111111111"
+
+slots:
+  # The player deposits the item to sell here (click an item in your inventory to place it).
+  - id: item
+    item: light_gray_stained_glass_pane name:"&eItem to sell"
+    lore:
+      - "&7Click an item in your inventory"
+      - "&7to place it here"
+    location:
+      row: 2
+      column: 5
+    left-click:
+      - id: ah_remove_item
+
+  - id: price
+    item: gold_ingot hide_attributes name:"&eSet Price"
+    lore:
+      - "&7Current: &a%price%"
+      - "&7Click to type a price"
+    location:
+      row: 4
+      column: 3
+    left-click:
+      - id: ah_set_price
+
+  - id: duration
+    item: clock name:"&eDuration"
+    lore:
+      - "&7Current: &f%duration%"
+      - "&7Click to change"
+    location:
+      row: 4
+      column: 5
+    left-click:
+      - id: ah_set_duration
+
+  - id: type
+    item: "%type_material% name:\"%type_name%\""
+    lore:
+      - "%type_desc%"
+      - "%toggle_hint%"
+    location:
+      row: 4
+      column: 7
+    left-click:
+      - id: ah_toggle_type
+
+  - id: continue
+    item: lime_stained_glass_pane name:"&aContinue"
+    lore:
+      - "&7Review and confirm your auction"
+    location:
+      row: 5
+      column: 4
+    left-click:
+      - id: ah_continue
+
+  - id: cancel
+    item: red_stained_glass_pane name:"&cCancel"
+    lore:
+      - "&7Return the item and exit"
+    location:
+      row: 5
+      column: 6
+    left-click:
+      - id: ah_cancel
+
 sounds:
   open:
     enabled: true
     name: BLOCK_CHEST_OPEN
     volume: 0.5
     pitch: 1.2
-items:
-  # The player deposits the item to sell here (click an item in your inventory to place it).
-  item:
-    slot: 14
-    material: LIGHT_GRAY_STAINED_GLASS_PANE
-    name: "&eItem to sell"
-    lore:
-      - "&7Click an item in your inventory"
-      - "&7to place it here"
-    action: REMOVE_ITEM
-  price:
-    slot: 30
-    material: GOLD_INGOT
-    name: "&eSet Price"
-    lore:
-      - "&7Current: &a{price}"
-      - "&7Click to type a price"
-    action: SET_PRICE
-  duration:
-    slot: 32
-    material: CLOCK
-    name: "&eDuration"
-    lore:
-      - "&7Current: &f{duration}"
-      - "&7Click to change"
-    action: SET_DURATION
-  type:
-    slot: 34
-    material: "{type_material}"
-    name: "{type_name}"
-    lore:
-      - "{type_desc}"
-      - "{toggle_hint}"
-    action: TOGGLE_TYPE
-  continue:
-    slot: 40
-    material: LIME_STAINED_GLASS_PANE
-    name: "&aContinue"
-    lore:
-      - "&7Review and confirm your auction"
-    action: CONTINUE
-  cancel:
-    slot: 42
-    material: RED_STAINED_GLASS_PANE
-    name: "&cCancel"
-    lore:
-      - "&7Return the item and exit"
-    action: CANCEL

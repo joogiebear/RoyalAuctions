@@ -25,6 +25,7 @@ public final class GuiManager {
     private final AuctionService service;
     private final PluginConfig config;
     private final CategoryManager categories;
+    private final com.mystipixel.royalauctions.tier.TierManager tiers;
     private final MessageManager messages;
     private final VaultHook vault;
     private final MenuManager menus;
@@ -33,15 +34,55 @@ public final class GuiManager {
     private final Map<UUID, CreateSession> createSessions = new ConcurrentHashMap<>();
 
     public GuiManager(JavaPlugin plugin, AuctionService service, PluginConfig config, CategoryManager categories,
-                      MessageManager messages, VaultHook vault, MenuManager menus, SignInput signInput) {
+                      com.mystipixel.royalauctions.tier.TierManager tiers, MessageManager messages,
+                      VaultHook vault, MenuManager menus, SignInput signInput) {
         this.plugin = plugin;
         this.service = service;
         this.config = config;
         this.categories = categories;
+        this.tiers = tiers;
         this.messages = messages;
         this.vault = vault;
         this.menus = menus;
         this.signInput = signInput;
+    }
+
+    // ------------------------------------------------------------------ hub / bids / seller view
+
+    /** The {@code /ah} landing menu. Loads the counts the hub icons display, then opens. */
+    public void openHub(Player player) {
+        UUID uuid = player.getUniqueId();
+        service.loadBidListings(uuid, bids -> service.loadSellerListings(uuid, mine -> {
+            int top = 0;
+            for (Listing l : bids) {
+                if (l.topBidderId() != null && l.topBidderId().equals(uuid)) {
+                    top++;
+                }
+            }
+            HubGui gui = new HubGui(this, player, bids.size(), top, mine.size(), service.activeCache());
+            player.openInventory(gui.getInventory());
+        }));
+    }
+
+    public void openBids(Player player) {
+        openBids(player, 0);
+    }
+
+    public void openBids(Player player, int page) {
+        service.loadBidListings(player.getUniqueId(), listings -> {
+            BidsGui gui = new BidsGui(this, player, listings);
+            gui.populate(page);
+            player.openInventory(gui.getInventory());
+        });
+    }
+
+    /** {@code /ah <username>} — that seller's active auctions. */
+    public void openSeller(Player player, UUID sellerId, String sellerName) {
+        service.loadSellerListings(sellerId, listings -> {
+            SellerGui gui = new SellerGui(this, player, sellerName, listings);
+            gui.populate(0);
+            player.openInventory(gui.getInventory());
+        });
     }
 
     // ------------------------------------------------------------------ browsing / buying / bidding
@@ -59,7 +100,36 @@ public final class GuiManager {
     }
 
     public void openConfirm(Player player, Listing listing, String category, String search, SortOrder sort, int page) {
+        if (!config.confirmPurchase()) {
+            service.purchase(player, listing, () -> openBrowse(player, category, search, sort, page));
+            return;
+        }
         ConfirmPurchaseGui gui = new ConfirmPurchaseGui(this, listing, category, search, sort, page);
+        player.openInventory(gui.getInventory());
+    }
+
+    /**
+     * Gate a bid behind a confirmation. A bid takes the money immediately (it's held until you're
+     * outbid or the auction ends), so a stray click on "Bid" is a real cost — hence the same
+     * treatment Buy-It-Now already had. Falls straight through when confirmations.bid is off.
+     */
+    public void confirmBid(Player player, Listing listing, double amount,
+                           String category, String search, SortOrder sort, int page) {
+        if (!config.confirmBid()) {
+            service.placeBid(player, listing, amount, () -> openBrowse(player, category, search, sort, page));
+            return;
+        }
+        ConfirmBidGui gui = new ConfirmBidGui(this, player, listing, amount, category, search, sort, page);
+        player.openInventory(gui.getInventory());
+    }
+
+    /** Gate a cancellation behind a confirmation. Falls through when confirmations.cancel is off. */
+    public void confirmCancel(Player player, Listing listing, int page) {
+        if (!config.confirmCancel()) {
+            service.cancelListing(player, listing, () -> openListings(player, page));
+            return;
+        }
+        ConfirmCancelGui gui = new ConfirmCancelGui(this, player, listing, page);
         player.openInventory(gui.getInventory());
     }
 
@@ -210,8 +280,9 @@ public final class GuiManager {
                 messages.send(player, "general.invalid-number");
                 openBrowse(player, category, search, sort, page);
             } else {
-                service.placeBid(player, listing, amount,
-                        () -> openBrowse(player, category, search, sort, page));
+                // A typed amount is the easiest place to fat-finger an extra zero, so it goes
+                // through the same confirmation as the one-click bid.
+                confirmBid(player, listing, amount, category, search, sort, page);
             }
         });
     }
@@ -269,6 +340,10 @@ public final class GuiManager {
 
     public CategoryManager categories() {
         return categories;
+    }
+
+    public com.mystipixel.royalauctions.tier.TierManager tiers() {
+        return tiers;
     }
 
     public MessageManager messages() {

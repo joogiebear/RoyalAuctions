@@ -113,77 +113,102 @@ bidding:
 #   tags             : built-in flags: EDIBLE, BLOCK, ARMOR, TOOL, WEAPON
 #   any              : true = catch-all (matches everything)
 # ---------------------------------------------------------------------
-categories:
-  weapons:
-    display-name: "&cWeapons"
-    icon: DIAMOND_SWORD
-    priority: 10
-    match:
-      material-suffixes: ["_SWORD", "_AXE"]
-      materials: ["BOW", "CROSSBOW", "TRIDENT", "MACE"]
-      tags: ["WEAPON"]
+# ---------------------------------------------------------------------
+# How categories resolve
+#
+# Order of resolution for every item:
+#   1. match.items:          an exact pin ("ecoitems:brazen_sword", "minecraft:trident").
+#                            Wins over EVERY other rule, in any category, at any priority.
+#   2. match.eco-namespaces: a whole eco plugin -> one category (talismans, ecoarmor, ...)
+#   3. match.materials / material-suffixes / material-prefixes / tags
+#                            inferred from the item's BASE material. This is only ever a guess
+#                            for custom items: a custom sword built on a STICK would land in Misc.
+#   4. match.any: true       the catch-all.
+#
+# Two tools so none of this is a black box:
+#   * /ah category  (while holding an item) tells you where it lands and WHICH rule decided it.
+#   * On startup, every eco item that only hit the catch-all is logged, so you know exactly
+#     which items are worth pinning, instead of enumerating every material in the game.
+# ---------------------------------------------------------------------
+category-options:
+  # true  = NO inference at all. Only items explicitly pinned via match.items: get a category;
+  #         everything else falls to the catch-all. For servers that want zero guessing.
+  # false = pins first, then the rules above. Recommended: works out of the box.
+  strict-items: false
 
-  armor:
-    display-name: "&9Armor"
-    icon: DIAMOND_CHESTPLATE
-    priority: 20
-    match:
-      eco-namespaces: ["ecoarmor"]
-      material-suffixes: ["_HELMET", "_CHESTPLATE", "_LEGGINGS", "_BOOTS"]
-      materials: ["ELYTRA", "SHIELD", "TURTLE_HELMET"]
-      tags: ["ARMOR"]
+# ---------------------------------------------------------------------
+# Browse categories
+#
+# Categories now live in their own folder: categories/<name>.yml
+# The FILE NAME is the category id, so categories/weapons.yml defines "weapons".
+# Add a category by dropping in a new file; remove one by deleting its file.
+# Ordering in the browser's column 1 comes from each file's `priority` (lowest first).
+#
+# Exactly one category must be the catch-all (`match.any: true`, highest priority number)
+# or items matching nothing would have nowhere to go. That's tools_misc.yml by default.
+#
+# If you are upgrading and still have a `categories:` block below, it is migrated into
+# categories/ automatically on first start and can then be deleted.
+# ---------------------------------------------------------------------
 
-  tools:
-    display-name: "&eTools"
-    icon: DIAMOND_PICKAXE
-    priority: 30
-    match:
-      material-suffixes: ["_PICKAXE", "_SHOVEL", "_HOE"]
-      materials: ["SHEARS", "FISHING_ROD", "FLINT_AND_STEEL", "BRUSH", "SPYGLASS"]
-      tags: ["TOOL"]
+# ---------------------------------------------------------------------
+# Confirmation screens
+#
+# The irreversible actions are gated behind a confirm screen. Buy-It-Now and
+# Create always had one; bids and cancellations did not - and both move real
+# value on a single click (a bid holds your money until you're outbid or the
+# auction ends). Turn any of them off if you prefer fewer clicks.
+#
+# Layouts: gui/confirm-purchase.yml, confirm-bid.yml, confirm-cancel.yml
+# ---------------------------------------------------------------------
+confirmations:
+  bid: true
+  cancel: true
+  purchase: true
 
-  talismans:
-    display-name: "&dTalismans"
-    icon: EMERALD
-    priority: 40
-    match:
-      eco-namespaces: ["talismans"]
+# ---------------------------------------------------------------------
+# Item tiers (the tier filter on the browse screen)
+#
+# Tiers ARE eco's rarities. They are discovered automatically from
+# plugins/EcoItems/rarities/*.yml, which is the eco suite's central rarity
+# registry: a rarity's `items:` list can claim items from ANY eco plugin
+# (ecoitems:, talismans:, reforges:, ecoarmor:, ecopets:, ecoscrolls:).
+#
+# That means you never define tiers here — you define them in EcoItems, and
+# whatever rarity an item shows in-game is exactly what this filter sorts by.
+# This section only CURATES the filter: cycle order, icons, and what to hide.
+#
+# The filter always starts at "No Filter" and cycles through the tiers below.
+# ---------------------------------------------------------------------
+tiers:
+  enabled: true
 
-  reforge_stones:
-    display-name: "&6Reforge Stones"
-    icon: ANVIL
-    priority: 50
-    match:
-      eco-namespaces: ["reforges"]
+  # Cycle order. Any discovered rarity not listed here is appended after these
+  # (sorted by weight). 'none' is always excluded — it means "no rarity".
+  order:
+    - common
+    - uncommon
+    - rare
+    - epic
+    - legendary
+    - mythic
+    - special
+    - very_special
 
-  enchanted_books:
-    display-name: "&bEnchanted Books"
-    icon: ENCHANTED_BOOK
-    priority: 60
-    match:
-      materials: ["ENCHANTED_BOOK", "BOOK"]
+  # Rarities to leave out of the filter entirely.
+  hide: []
 
-  consumables:
-    display-name: "&aConsumables"
-    icon: GOLDEN_APPLE
-    priority: 70
-    match:
-      materials: ["POTION", "SPLASH_POTION", "LINGERING_POTION", "EXPERIENCE_BOTTLE"]
-      tags: ["EDIBLE"]
+  # Optional icon per tier, shown on the tier filter button.
+  icons:
+    common: WHITE_DYE
+    uncommon: LIME_DYE
+    rare: BLUE_DYE
+    epic: PURPLE_DYE
+    legendary: ORANGE_DYE
+    mythic: RED_DYE
+    special: PINK_DYE
+    very_special: MAGENTA_DYE
 
-  blocks:
-    display-name: "&2Blocks"
-    icon: GRASS_BLOCK
-    priority: 80
-    match:
-      tags: ["BLOCK"]
-
-  misc:
-    display-name: "&7Miscellaneous"
-    icon: CHEST
-    priority: 999
-    match:
-      any: true
 
 # ---------------------------------------------------------------------
 # Sorting for the browse screen. Options: NEWEST, OLDEST, PRICE_LOW, PRICE_HIGH

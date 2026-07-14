@@ -1,33 +1,48 @@
-# Confirm Purchase (Buy It Now). Placeholders: {price} {seller}
+# Confirm Purchase (Buy It Now). Placeholders: %price% %seller%
+
 title: "&8Confirm Purchase"
 rows: 3
-filler:
-  enabled: true
-  material: GRAY_STAINED_GLASS_PANE
-  name: " "
+
+mask:
+  items:
+    - gray_stained_glass_pane
+  pattern:
+    - "111111111"
+    - "111111111"
+    - "111111111"
+
+slots:
+  - id: item
+    item: paper name:"&fItem"
+    lore: []
+    location:
+      row: 2
+      column: 5
+    left-click: []
+
+  - id: confirm
+    item: lime_stained_glass_pane name:"&aConfirm Purchase"
+    lore:
+      - "&7Buy for &a%price%"
+    location:
+      row: 2
+      column: 3
+    left-click:
+      - id: ah_confirm_purchase
+
+  - id: cancel
+    item: red_stained_glass_pane name:"&cCancel"
+    lore:
+      - "&7Return to the Auction House"
+    location:
+      row: 2
+      column: 7
+    left-click:
+      - id: ah_browse
+
 sounds:
   success:
     enabled: true
     name: ENTITY_EXPERIENCE_ORB_PICKUP
     volume: 0.8
     pitch: 1.4
-items:
-  item:
-    slot: 14
-    material: PAPER
-    name: "&fItem"
-    action: NONE
-  confirm:
-    slot: 12
-    material: LIME_STAINED_GLASS_PANE
-    name: "&aConfirm Purchase"
-    lore:
-      - "&7Buy for &a{price}"
-    action: CONFIRM_PURCHASE
-  cancel:
-    slot: 16
-    material: RED_STAINED_GLASS_PANE
-    name: "&cCancel"
-    lore:
-      - "&7Return to the Auction House"
-    action: OPEN_BROWSE

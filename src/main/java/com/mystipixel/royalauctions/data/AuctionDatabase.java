@@ -121,7 +121,9 @@ public final class AuctionDatabase {
                     + "status VARCHAR(16) NOT NULL,"
                     + "buyer_id CHAR(36),"
                     + "sold_at BIGINT)");
-            // Upgrade databases created before bidding was added.
+            // Upgrade databases created before bidding / tiers were added. Existing rows get a NULL
+            // tier, which simply means "no rarity" — they still show under the unfiltered view.
+            addColumn(st, "tier", "VARCHAR(32)");
             addColumn(st, "type", "VARCHAR(16) NOT NULL DEFAULT 'BIN'");
             addColumn(st, "current_bid", "DOUBLE PRECISION");
             addColumn(st, "top_bidder_id", "CHAR(36)");
@@ -133,10 +135,25 @@ public final class AuctionDatabase {
                     + "item_data " + bigText() + " NOT NULL,"
                     + "reason VARCHAR(16) NOT NULL,"
                     + "created_at BIGINT NOT NULL)");
+            // Every bid ever placed. ra_listings only remembers the *current* top bidder, so this is
+            // what makes "auctions I've bid on" (including ones I've since been outbid on) knowable.
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS ra_bids ("
+                    + "id " + autoIncrementPk() + ","
+                    + "listing_id CHAR(36) NOT NULL,"
+                    + "bidder_id CHAR(36) NOT NULL,"
+                    + "bidder_name VARCHAR(32) NOT NULL,"
+                    + "amount DOUBLE PRECISION NOT NULL,"
+                    + "created_at BIGINT NOT NULL)");
             createIndex(st, "idx_ra_listings_status", "ra_listings(status)");
             createIndex(st, "idx_ra_listings_seller", "ra_listings(seller_id)");
             createIndex(st, "idx_ra_collection_owner", "ra_collection(owner_id)");
+            createIndex(st, "idx_ra_bids_bidder", "ra_bids(bidder_id)");
+            createIndex(st, "idx_ra_bids_listing", "ra_bids(listing_id)");
         }
+    }
+
+    private String autoIncrementPk() {
+        return type == Type.MYSQL ? "BIGINT PRIMARY KEY AUTO_INCREMENT" : "INTEGER PRIMARY KEY AUTOINCREMENT";
     }
 
     private void addColumn(Statement st, String column, String definition) {
@@ -165,9 +182,9 @@ public final class AuctionDatabase {
 
     public void insertListing(Listing l) throws SQLException {
         String sql = "INSERT INTO ra_listings "
-                + "(id,seller_id,seller_name,item_data,display_name,category,type,price,"
+                + "(id,seller_id,seller_name,item_data,display_name,category,tier,type,price,"
                 + "current_bid,top_bidder_id,top_bidder_name,bid_count,created_at,expires_at,status) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, l.id().toString());
             ps.setString(2, l.sellerId().toString());
@@ -175,15 +192,16 @@ public final class AuctionDatabase {
             ps.setString(4, ItemSerialization.toBase64(l.itemData()));
             ps.setString(5, l.displayName());
             ps.setString(6, l.category());
-            ps.setString(7, l.type().name());
-            ps.setDouble(8, l.price());
-            ps.setDouble(9, l.currentBid());
-            ps.setString(10, l.topBidderId() == null ? null : l.topBidderId().toString());
-            ps.setString(11, l.topBidderName());
-            ps.setInt(12, l.bidCount());
-            ps.setLong(13, l.createdAt());
-            ps.setLong(14, l.expiresAt());
-            ps.setString(15, l.status().name());
+            ps.setString(7, l.tier());
+            ps.setString(8, l.type().name());
+            ps.setDouble(9, l.price());
+            ps.setDouble(10, l.currentBid());
+            ps.setString(11, l.topBidderId() == null ? null : l.topBidderId().toString());
+            ps.setString(12, l.topBidderName());
+            ps.setInt(13, l.bidCount());
+            ps.setLong(14, l.createdAt());
+            ps.setLong(15, l.expiresAt());
+            ps.setString(16, l.status().name());
             ps.executeUpdate();
         }
     }
@@ -213,6 +231,36 @@ public final class AuctionDatabase {
             }
         }
         return out;
+    }
+
+    /**
+     * Every still-active auction this player has bid on — whether they're currently winning or have
+     * been outbid. Backed by {@code ra_bids}, so it only knows bids placed since that table existed.
+     */
+    public List<Listing> activeListingsBidOnBy(UUID bidderId) throws SQLException {
+        List<Listing> out = new ArrayList<>();
+        String sql = "SELECT l.* FROM ra_listings l WHERE l.status='ACTIVE' AND EXISTS ("
+                + "SELECT 1 FROM ra_bids b WHERE b.listing_id = l.id AND b.bidder_id = ?) "
+                + "ORDER BY l.expires_at ASC";
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, bidderId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(mapListing(rs));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Repair a listing whose stored category no longer exists (categories were renamed in config). */
+    public void updateCategory(UUID id, String category) throws SQLException {
+        String sql = "UPDATE ra_listings SET category=? WHERE id=?";
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, category);
+            ps.setString(2, id.toString());
+            ps.executeUpdate();
+        }
     }
 
     public int countActiveBySeller(UUID sellerId) throws SQLException {
@@ -343,6 +391,18 @@ public final class AuctionDatabase {
                         return BidOutcome.fail("OUTBID"); // lost the optimistic race
                     }
                 }
+                // Record the bid itself. The listing row only ever remembers the *current* leader, so
+                // without this there'd be no way to know which auctions a player has bid on once outbid.
+                try (PreparedStatement ins = c.prepareStatement(
+                        "INSERT INTO ra_bids (listing_id, bidder_id, bidder_name, amount, created_at) "
+                        + "VALUES (?,?,?,?,?)")) {
+                    ins.setString(1, id.toString());
+                    ins.setString(2, bidderId.toString());
+                    ins.setString(3, bidderName);
+                    ins.setDouble(4, amount);
+                    ins.setLong(5, System.currentTimeMillis());
+                    ins.executeUpdate();
+                }
                 c.commit();
                 return BidOutcome.ok(prevBidder, prevBidderName, prevBid);
             } catch (SQLException e) {
@@ -453,6 +513,7 @@ public final class AuctionDatabase {
                 ItemSerialization.fromBase64(rs.getString("item_data")),
                 rs.getString("display_name"),
                 rs.getString("category"),
+                rs.getString("tier"),
                 ListingType.fromString(typeStr, ListingType.BIN),
                 rs.getDouble("price"),
                 rs.getLong("created_at"),

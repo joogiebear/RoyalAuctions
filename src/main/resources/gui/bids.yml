@@ -1,7 +1,8 @@
-# Manage Auctions: your active listings. Right-click a listing to cancel (blocked once it has bids).
-# Placeholders: %count% %page% %pages%
+# View Bids — every active auction you've bid on, marked TOP BIDDER or OUTBID.
+# Being outbid means you were already refunded, so nothing is at stake — click to re-bid.
+# Placeholders: %count% %top% %outbid% %page% %pages%
 
-title: "&8Auction House &7» &fManage Auctions"
+title: "&8Auction House &7» &fYour Bids"
 rows: 6
 
 mask:
@@ -39,9 +40,10 @@ slots:
       - id: ah_hub
 
   - id: info
-    item: writable_book hide_attributes name:"&eYour Listings"
+    item: gold_ingot hide_attributes name:"&eYour Bids"
     lore:
-      - "&7Active: &f%count%"
+      - "&7Top bidder on &a%top% &7of &f%count%"
+      - "&7Outbid: &c%outbid%"
       - "&7Page: &f%page%/%pages%"
     location:
       row: 6

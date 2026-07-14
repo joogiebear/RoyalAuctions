@@ -1,0 +1,121 @@
+# Auction House — the landing menu opened by /ah
+#
+# EcoMenus-style layout:
+#   mask.pattern  - one line per row, 9 chars each. 1-9 = mask.items filler, 0/letters = dynamic region.
+#   slots         - hand-placed buttons, positioned by 1-based row/column.
+#   left-click    - list of effects; the first recognised id becomes the button's action.
+#
+# Placeholders: %total_bids% %top_bids% %outbid% %my_listings% %active% %player%
+
+title: "&8Auction House"
+rows: 3
+
+mask:
+  items:
+    - gray_stained_glass_pane
+    - black_stained_glass_pane
+  pattern:
+    - "222222222"
+    - "211111112"
+    - "222222222"
+
+slots:
+  - id: browse
+    item: chest hide_attributes name:"&6&lAuction Browser"
+    lore:
+      - "&7Browse every auction and"
+      - "&7buy-it-now listing on the server."
+      - ""
+      - "&7Live listings: &f%active%"
+      - ""
+      - "&eClick to browse!"
+    location:
+      row: 2
+      column: 3
+    left-click:
+      - id: ah_browse
+      - id: play_sound
+        args:
+          sound: ui_button_click
+          pitch: 1
+          volume: 1
+
+  - id: bids
+    item: gold_ingot hide_attributes name:"&e&lView Bids"
+    lore:
+      - "&7Every auction you have bid on."
+      - ""
+      - "&7Top bidder on &a%top_bids% &7of &f%total_bids%"
+      - "&7Outbid: &c%outbid%"
+      - ""
+      - "&eClick to view!"
+    location:
+      row: 2
+      column: 5
+    left-click:
+      - id: ah_bids
+      - id: play_sound
+        args:
+          sound: ui_button_click
+          pitch: 1
+          volume: 1
+
+  - id: manage
+    item: writable_book hide_attributes name:"&a&lManage Auctions"
+    lore:
+      - "&7View, and cancel, the auctions"
+      - "&7you have listed."
+      - ""
+      - "&7Your listings: &f%my_listings%"
+      - ""
+      - "&eClick to manage!"
+    location:
+      row: 2
+      column: 7
+    left-click:
+      - id: ah_manage
+      - id: play_sound
+        args:
+          sound: ui_button_click
+          pitch: 1
+          volume: 1
+
+  - id: collection
+    item: ender_chest hide_attributes name:"&dCollection"
+    lore:
+      - "&7Claim purchases and returned items."
+      - ""
+      - "&eClick to open!"
+    location:
+      row: 3
+      column: 4
+    left-click:
+      - id: ah_collection
+
+  - id: create
+    item: anvil hide_attributes name:"&aCreate Auction"
+    lore:
+      - "&7List an item for sale or auction."
+      - ""
+      - "&eClick to create!"
+    location:
+      row: 3
+      column: 6
+    left-click:
+      - id: ah_create
+
+  - id: close
+    item: barrier name:"&cClose"
+    lore: []
+    location:
+      row: 3
+      column: 5
+    left-click:
+      - id: close_inventory
+
+sounds:
+  open:
+    enabled: true
+    name: UI_BUTTON_CLICK
+    volume: 0.6
+    pitch: 1.2

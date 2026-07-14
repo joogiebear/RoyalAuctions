@@ -1,0 +1,8 @@
+display-name: "&dAccessories"
+icon: EMERALD
+priority: 30
+
+match:
+  items: []
+  eco-namespaces: ["talismans", "reforges", "ecopets", "ecoscrolls", "stattrackers"]
+  materials: ["ENCHANTED_BOOK"]

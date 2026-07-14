@@ -1,0 +1,25 @@
+# The catch-all. Keep ONE category with `any: true` and the highest priority number,
+# or items matching nothing would have nowhere to go.
+
+display-name: "&eTools & Misc"
+icon: DIAMOND_PICKAXE
+priority: 999
+
+match:
+  items:
+    - "ecoitems:grappling_hook"
+    # Enchanted crafting materials: their base material (diamond, emerald, ...) matches no
+    # category, so pin them here deliberately. Move them if you add a Materials category.
+    # (enchanted_cobblestone is NOT here - its cobblestone base already lands it in Blocks.)
+    - "ecoitems:enchanted_diamond"
+    - "ecoitems:enchanted_emerald"
+    - "ecoitems:enchanted_ender_eye"
+    - "ecoitems:enchanted_ender_pearl"
+    - "ecoitems:enchanted_iron_ingot"
+
+  material-suffixes: ["_PICKAXE", "_SHOVEL", "_HOE"]
+  materials: ["SHEARS", "FISHING_ROD", "FLINT_AND_STEEL", "BRUSH", "SPYGLASS"]
+  tags: ["TOOL"]
+
+  # Catch-all: anything unmatched by every category above lands here.
+  any: true

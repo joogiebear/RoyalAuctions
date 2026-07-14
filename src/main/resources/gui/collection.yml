@@ -1,38 +1,68 @@
 # Collection: purchases (that didn't fit) and expired/cancelled listings waiting to be claimed.
-# Placeholders: {count} {page} {pages}
+# Placeholders: %count% %page% %pages%
+
 title: "&8Auction House &7» &fCollection"
 rows: 6
-filler:
-  enabled: true
-  material: GRAY_STAINED_GLASS_PANE
-  name: " "
-items:
-  prev:
-    slot: 46
-    material: ARROW
-    name: "&ePrevious Page"
-    action: PREV_PAGE
-  back:
-    slot: 49
-    material: OAK_DOOR
-    name: "&eBack to Auction House"
-    action: OPEN_BROWSE
-  info:
-    slot: 50
-    material: ENDER_CHEST
-    name: "&eCollection"
+
+mask:
+  items:
+    - gray_stained_glass_pane
+  pattern:
+    - "000000000"
+    - "000000000"
+    - "000000000"
+    - "000000000"
+    - "000000000"
+    - "111111111"
+
+regions:
+  content-slots: "0"
+
+slots:
+  - id: prev
+    item: arrow name:"&ePrevious Page"
     lore:
-      - "&7Items: &f{count}"
-      - "&7Page: &f{page}/{pages}"
-    action: NONE
-  close:
-    slot: 51
-    material: BARRIER
-    name: "&cClose"
-    action: CLOSE
-  next:
-    slot: 54
-    material: ARROW
-    name: "&eNext Page"
-    action: NEXT_PAGE
-content-slots: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45]
+      - "&7Page %page%/%pages%"
+    location:
+      row: 6
+      column: 1
+    left-click:
+      - id: ah_prev_page
+
+  - id: back
+    item: oak_door name:"&eBack to Auction House"
+    lore: []
+    location:
+      row: 6
+      column: 4
+    left-click:
+      - id: ah_hub
+
+  - id: info
+    item: ender_chest hide_attributes name:"&eCollection"
+    lore:
+      - "&7Items: &f%count%"
+      - "&7Page: &f%page%/%pages%"
+    location:
+      row: 6
+      column: 5
+    left-click: []
+
+  - id: close
+    item: barrier name:"&cClose"
+    lore: []
+    location:
+      row: 6
+      column: 6
+    left-click:
+      - id: close_inventory
+
+  - id: next
+    item: arrow name:"&eNext Page"
+    lore:
+      - "&7Page %page%/%pages%"
+    location:
+      row: 6
+      column: 9
+    left-click:
+      - id: ah_next_page

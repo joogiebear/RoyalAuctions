@@ -4,13 +4,26 @@ import com.mystipixel.royalauctions.data.ListingType;
 import com.mystipixel.royalauctions.data.SortOrder;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.MemoryConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.logging.Level;
 
-/** Typed, reloadable view over config.yml. */
+/** Typed, reloadable view over config.yml plus the categories/ folder. */
 public final class PluginConfig {
+
+    /** Shipped on a fresh install; the file name is the category id. */
+    private static final String[] DEFAULT_CATEGORIES = {
+            "weapons.yml", "armor.yml", "accessories.yml", "consumables.yml", "blocks.yml", "tools_misc.yml"
+    };
 
     /** One selectable duration on the "Auction Duration" screen. */
     public record DurationOption(String label, int hours, Material icon) {
@@ -117,8 +130,116 @@ public final class PluginConfig {
         return s != null ? s : plugin.getConfig().createSection("storage");
     }
 
+    /**
+     * The categories, assembled from {@code categories/<name>.yml} — one file per category, the file
+     * name being the category id. Kept out of config.yml so a server with twenty categories doesn't
+     * have a thousand-line config; each file is small, self-contained and easy to diff.
+     *
+     * <p>On first run (or when upgrading from the old inline {@code categories:} block) the folder is
+     * populated automatically — see {@link #migrateCategoriesIfNeeded()} — so nobody loses their
+     * existing setup.
+     */
     public ConfigurationSection categoriesSection() {
-        return plugin.getConfig().getConfigurationSection("categories");
+        migrateCategoriesIfNeeded();
+
+        MemoryConfiguration combined = new MemoryConfiguration();
+        File dir = new File(plugin.getDataFolder(), "categories");
+        File[] files = dir.listFiles((d, n) -> n.toLowerCase(Locale.ROOT).endsWith(".yml") && !n.startsWith("_"));
+        if (files == null || files.length == 0) {
+            plugin.getLogger().warning("No categories/*.yml found - items will be uncategorised.");
+            return combined;
+        }
+        Arrays.sort(files, Comparator.comparing(File::getName));
+        for (File file : files) {
+            String id = file.getName().substring(0, file.getName().length() - 4).toLowerCase(Locale.ROOT);
+            YamlConfiguration cfg = YamlConfiguration.loadConfiguration(file);
+            ConfigurationSection section = combined.createSection(id);
+            for (String key : cfg.getKeys(true)) {
+                if (!cfg.isConfigurationSection(key)) {
+                    section.set(key, cfg.get(key));
+                }
+            }
+        }
+        return combined;
+    }
+
+    /**
+     * Create {@code categories/} on first run. If the user still has the legacy inline
+     * {@code categories:} block in config.yml, split it into one file per category rather than
+     * silently ignoring it — an upgrade must never quietly drop someone's categories.
+     */
+    private void migrateCategoriesIfNeeded() {
+        File dir = new File(plugin.getDataFolder(), "categories");
+        if (dir.isDirectory() && dir.list((d, n) -> n.endsWith(".yml")) != null
+                && dir.list((d, n) -> n.endsWith(".yml")).length > 0) {
+            return;
+        }
+        if (!dir.exists() && !dir.mkdirs()) {
+            plugin.getLogger().warning("Could not create the categories/ folder.");
+            return;
+        }
+
+        ConfigurationSection legacy = plugin.getConfig().getConfigurationSection("categories");
+        if (legacy != null && !legacy.getKeys(false).isEmpty()) {
+            int written = 0;
+            for (String id : legacy.getKeys(false)) {
+                ConfigurationSection cs = legacy.getConfigurationSection(id);
+                if (cs == null) {
+                    continue;
+                }
+                YamlConfiguration out = new YamlConfiguration();
+                for (String key : cs.getKeys(true)) {
+                    if (!cs.isConfigurationSection(key)) {
+                        out.set(key, cs.get(key));
+                    }
+                }
+                try {
+                    out.save(new File(dir, id.toLowerCase(Locale.ROOT) + ".yml"));
+                    written++;
+                } catch (IOException e) {
+                    plugin.getLogger().log(Level.WARNING, "Could not write categories/" + id + ".yml", e);
+                }
+            }
+            plugin.getLogger().info("Migrated " + written + " categor(ies) from config.yml into categories/."
+                    + " The 'categories:' block in config.yml is now ignored and can be deleted.");
+            return;
+        }
+
+        // Fresh install: ship the defaults.
+        for (String name : DEFAULT_CATEGORIES) {
+            plugin.saveResource("categories/" + name, false);
+        }
+        plugin.getLogger().info("Created categories/ with " + DEFAULT_CATEGORIES.length + " default categories.");
+    }
+
+    /**
+     * Whether the irreversible actions are gated behind a confirmation screen. Buy-It-Now and Create
+     * always had one; bids and cancellations did not, and both move real value on a single click.
+     * Servers that prefer fewer clicks can switch any of them off.
+     */
+    public boolean confirmBid() {
+        return plugin.getConfig().getBoolean("confirmations.bid", true);
+    }
+
+    public boolean confirmCancel() {
+        return plugin.getConfig().getBoolean("confirmations.cancel", true);
+    }
+
+    public boolean confirmPurchase() {
+        return plugin.getConfig().getBoolean("confirmations.purchase", true);
+    }
+
+    /** Curation for the tier filter; the tiers themselves are discovered from eco's rarities. */
+    public ConfigurationSection tiersSection() {
+        return plugin.getConfig().getConfigurationSection("tiers");
+    }
+
+    /**
+     * Options for how categories resolve ({@code strict-items}, the startup audit). Kept out of the
+     * {@code categories:} map itself, since every key in there is read as a category id.
+     */
+    public ConfigurationSection categoryOptionsSection() {
+        return plugin.getConfig().getConfigurationSection("category-options");
     }
 
     /** Compute the listing fee for a given sale price. */

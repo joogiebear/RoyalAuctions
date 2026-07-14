@@ -1,17 +1,27 @@
 # Auction Duration. The duration buttons are generated from listings.durations in config.yml
-# and placed into duration-slots (in order).
+# and placed into the "duration-slots" region (marked D in the mask), in order.
+
 title: "&8Auction Duration"
 rows: 3
-filler:
-  enabled: true
-  material: BLACK_STAINED_GLASS_PANE
-  name: " "
-items:
-  back:
-    slot: 23
-    material: OAK_DOOR
-    name: "&eBack"
+
+mask:
+  items:
+    - black_stained_glass_pane
+  pattern:
+    - "111111111"
+    - "DDDDDDD11"
+    - "111111111"
+
+regions:
+  duration-slots: "D"
+
+slots:
+  - id: back
+    item: oak_door name:"&eBack"
     lore:
       - "&7Return to Create Auction"
-    action: BACK
-duration-slots: [10,11,12,13,14,15,16]
+    location:
+      row: 3
+      column: 5
+    left-click:
+      - id: ah_back

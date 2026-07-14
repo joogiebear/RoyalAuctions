@@ -1,0 +1,46 @@
+# Confirm Cancel. Shown before a listing is cancelled
+# (disable with confirmations.cancel: false in config.yml).
+# Placeholders: %price% %bids%
+
+title: "&8Cancel Listing?"
+rows: 3
+
+mask:
+  items:
+    - gray_stained_glass_pane
+  pattern:
+    - "111111111"
+    - "111111111"
+    - "111111111"
+
+slots:
+  - id: item
+    item: paper name:"&fItem"
+    lore: []
+    location:
+      row: 2
+      column: 5
+    left-click: []
+
+  - id: confirm
+    item: lime_stained_glass_pane name:"&aConfirm Cancel"
+    lore:
+      - "&7Remove this listing from the"
+      - "&7Auction House."
+      - ""
+      - "&7The item goes to your Collection."
+    location:
+      row: 2
+      column: 3
+    left-click:
+      - id: ah_confirm_cancel
+
+  - id: cancel
+    item: red_stained_glass_pane name:"&cKeep Listing"
+    lore:
+      - "&7Leave it up for sale."
+    location:
+      row: 2
+      column: 7
+    left-click:
+      - id: ah_back

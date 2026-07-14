@@ -9,11 +9,16 @@ public final class MenuManager {
 
     private final JavaPlugin plugin;
 
+    private MenuTemplate hub;
     private MenuTemplate browse;
+    private MenuTemplate bids;
+    private MenuTemplate seller;
     private MenuTemplate create;
     private MenuTemplate duration;
     private MenuTemplate confirmPurchase;
     private MenuTemplate confirmAuction;
+    private MenuTemplate confirmBid;
+    private MenuTemplate confirmCancel;
     private MenuTemplate bid;
     private MenuTemplate collection;
     private MenuTemplate manage;
@@ -24,11 +29,16 @@ public final class MenuManager {
     }
 
     public void reload() {
+        this.hub = load("hub.yml", "&8Auction House", 3);
         this.browse = load("browse.yml", "&8Auction House", 6);
+        this.bids = load("bids.yml", "&8Your Bids", 6);
+        this.seller = load("seller.yml", "&8Auctions", 6);
         this.create = load("create.yml", "&8Create Auction", 5);
         this.duration = load("duration.yml", "&8Auction Duration", 3);
         this.confirmPurchase = load("confirm-purchase.yml", "&8Confirm Purchase", 3);
         this.confirmAuction = load("confirm-auction.yml", "&8Confirm Auction", 3);
+        this.confirmBid = load("confirm-bid.yml", "&8Confirm Bid", 3);
+        this.confirmCancel = load("confirm-cancel.yml", "&8Cancel Listing?", 3);
         this.bid = load("bid.yml", "&8Place Bid", 3);
         this.collection = load("collection.yml", "&8Collection", 6);
         this.manage = load("manage.yml", "&8Manage Auctions", 6);
@@ -42,8 +52,20 @@ public final class MenuManager {
         return MenuTemplate.load(file, defaultTitle, defaultRows);
     }
 
+    public MenuTemplate hub() {
+        return hub;
+    }
+
     public MenuTemplate browse() {
         return browse;
+    }
+
+    public MenuTemplate bids() {
+        return bids;
+    }
+
+    public MenuTemplate seller() {
+        return seller;
     }
 
     public MenuTemplate create() {
@@ -60,6 +82,14 @@ public final class MenuManager {
 
     public MenuTemplate confirmAuction() {
         return confirmAuction;
+    }
+
+    public MenuTemplate confirmBid() {
+        return confirmBid;
+    }
+
+    public MenuTemplate confirmCancel() {
+        return confirmCancel;
     }
 
     public MenuTemplate bid() {

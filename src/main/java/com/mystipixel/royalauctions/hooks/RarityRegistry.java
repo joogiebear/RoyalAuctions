@@ -1,0 +1,169 @@
+package com.mystipixel.royalauctions.hooks;
+
+import org.bukkit.configuration.file.YamlConfiguration;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.logging.Logger;
+
+/**
+ * The eco suite's rarity registry, read straight from {@code plugins/EcoItems/rarities/*.yml}.
+ *
+ * <p>EcoItems' rarities are not EcoItems-only: each rarity file carries an {@code items:} list that
+ * can claim items from <em>any</em> eco namespace — {@code talismans:}, {@code ecoarmor:},
+ * {@code reforges:}, {@code ecopets:}, {@code ecoscrolls:} — which makes this folder the single
+ * source of truth for item rarity across the whole suite. We read it directly (no API coupling to a
+ * paid plugin), so whatever rarity the item shows in-game is exactly what the auction filter uses.
+ *
+ * <p>An item's rarity can be declared two ways, and both are honoured:
+ * <ol>
+ *   <li>a rarity's {@code items:} list naming the item ({@code namespace:id})</li>
+ *   <li>an EcoItems item's own {@code rarity:} field</li>
+ * </ol>
+ * If more than one rarity claims an item, the highest {@code weight} wins — matching EcoItems' own
+ * semantics (that's why {@code none} ships with weight 100).
+ */
+public final class RarityRegistry {
+
+    /** One rarity: its id (the file name), display text, and weight. */
+    public record Rarity(String id, String display, int weight) {
+    }
+
+    /** The rarity id EcoItems uses to mean "explicitly no rarity". */
+    public static final String NONE = "none";
+
+    private final boolean present;
+    private final Map<String, Rarity> byId = new HashMap<>();
+    private final Map<String, String> rarityByItemKey = new HashMap<>();   // "namespace:id" -> rarity id
+    private final Map<String, Integer> weightByItemKey = new HashMap<>();  // for conflict resolution
+
+    public RarityRegistry(File pluginsFolder, Logger logger) {
+        File rarityDir = new File(pluginsFolder, "EcoItems/rarities");
+        this.present = rarityDir.isDirectory();
+        if (!present) {
+            return;
+        }
+        loadRarities(rarityDir);
+        loadItemRarityFields(new File(pluginsFolder, "EcoItems/items"));
+        logger.info("Rarity registry loaded: " + byId.size() + " rarities, "
+                + rarityByItemKey.size() + " items tiered.");
+    }
+
+    public boolean isPresent() {
+        return present;
+    }
+
+    /** Every rarity, excluding {@code none}, ordered by weight then id. */
+    public List<Rarity> rarities() {
+        List<Rarity> out = new ArrayList<>();
+        for (Rarity r : byId.values()) {
+            if (!r.id().equals(NONE)) {
+                out.add(r);
+            }
+        }
+        out.sort((a, b) -> a.weight() != b.weight()
+                ? Integer.compare(a.weight(), b.weight())
+                : a.id().compareTo(b.id()));
+        return out;
+    }
+
+    public Rarity byId(String id) {
+        return id == null ? null : byId.get(id.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * The rarity id of an eco item, keyed by its full lookup id ({@code talismans:starter_talisman}).
+     * Returns null for untiered items and for the explicit {@code none} rarity.
+     */
+    public String rarityOf(String ecoItemKey) {
+        if (ecoItemKey == null) {
+            return null;
+        }
+        String rarity = rarityByItemKey.get(ecoItemKey.toLowerCase(Locale.ROOT));
+        return NONE.equals(rarity) ? null : rarity;
+    }
+
+    // ------------------------------------------------------------------ loading
+
+    private void loadRarities(File dir) {
+        File[] files = dir.listFiles((d, n) -> n.toLowerCase(Locale.ROOT).endsWith(".yml") && !n.startsWith("_"));
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            String id = stripExtension(file.getName());
+            YamlConfiguration cfg = YamlConfiguration.loadConfiguration(file);
+            int weight = cfg.getInt("weight", 1);
+
+            List<String> lore = cfg.getStringList("lore");
+            String display = lore.isEmpty() ? prettify(id) : lore.get(0);
+
+            byId.put(id, new Rarity(id, display, weight));
+
+            // A rarity's items: list can name items from ANY eco plugin — this is the cross-suite hook.
+            for (String itemKey : cfg.getStringList("items")) {
+                claim(itemKey, id, weight);
+            }
+        }
+    }
+
+    /** EcoItems' own items may instead declare {@code rarity:} in their config. */
+    private void loadItemRarityFields(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            if (file.isDirectory()) {
+                loadItemRarityFields(file); // items may live in subfolders
+                continue;
+            }
+            String name = file.getName();
+            if (!name.toLowerCase(Locale.ROOT).endsWith(".yml") || name.startsWith("_")) {
+                continue;
+            }
+            YamlConfiguration cfg = YamlConfiguration.loadConfiguration(file);
+            String rarity = cfg.getString("rarity");
+            if (rarity == null || rarity.isBlank()) {
+                continue;
+            }
+            rarity = rarity.trim().toLowerCase(Locale.ROOT);
+            Rarity r = byId.get(rarity);
+            claim("ecoitems:" + stripExtension(name), rarity, r == null ? 1 : r.weight());
+        }
+    }
+
+    /** Assign a rarity to an item key; the highest weight wins if several rarities claim it. */
+    private void claim(String itemKey, String rarityId, int weight) {
+        if (itemKey == null || itemKey.isBlank()) {
+            return;
+        }
+        String key = itemKey.trim().toLowerCase(Locale.ROOT);
+        Integer existing = weightByItemKey.get(key);
+        if (existing != null && existing >= weight) {
+            return;
+        }
+        rarityByItemKey.put(key, rarityId);
+        weightByItemKey.put(key, weight);
+    }
+
+    private static String stripExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return (dot < 0 ? fileName : fileName.substring(0, dot)).toLowerCase(Locale.ROOT);
+    }
+
+    private static String prettify(String id) {
+        String[] words = id.replace('_', ' ').trim().split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String w : words) {
+            if (!w.isEmpty()) {
+                sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1)).append(' ');
+            }
+        }
+        return sb.toString().trim();
+    }
+}

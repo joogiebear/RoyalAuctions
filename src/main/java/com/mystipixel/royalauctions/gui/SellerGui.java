@@ -13,22 +13,29 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Manage Auctions — layout from gui/manage.yml; right-click a listing to cancel (blocked once bid on). */
-public final class ListingsGui extends AuctionGui {
+/**
+ * A single seller's active auctions — the {@code /ah <username>} view. Read-only browsing of someone
+ * else's listings: click to buy (BIN) or bid (auction), exactly like the main browser.
+ * Layout from gui/seller.yml.
+ */
+public final class SellerGui extends AuctionGui {
 
     private final GuiManager manager;
     private final MenuTemplate template;
     private final Player player;
+    private final String sellerName;
     private final List<Listing> listings;
     private final Map<Integer, Listing> slotToListing = new HashMap<>();
     private int page;
 
-    public ListingsGui(GuiManager manager, Player player, List<Listing> listings) {
+    public SellerGui(GuiManager manager, Player player, String sellerName, List<Listing> listings) {
         this.manager = manager;
-        this.template = manager.menus().manage();
+        this.template = manager.menus().seller();
         this.player = player;
+        this.sellerName = sellerName;
         this.listings = listings;
-        this.inventory = Bukkit.createInventory(this, template.size(), Text.color(template.title(Map.of())));
+        this.inventory = Bukkit.createInventory(this, template.size(),
+                Text.color(template.title(Map.of("seller", sellerName))));
     }
 
     public void populate(int page) {
@@ -47,29 +54,39 @@ public final class ListingsGui extends AuctionGui {
             page = pages - 1;
         }
 
-        template.applyStatic(inventory, Map.of(
-                "count", String.valueOf(listings.size()),
-                "page", String.valueOf(page + 1),
-                "pages", String.valueOf(pages)));
+        Map<String, String> ph = new HashMap<>();
+        ph.put("seller", sellerName);
+        ph.put("count", String.valueOf(listings.size()));
+        ph.put("page", String.valueOf(page + 1));
+        ph.put("pages", String.valueOf(pages));
+        template.applyStatic(inventory, ph);
 
         int from = page * perPage;
         for (int i = 0; i < perPage && from + i < listings.size(); i++) {
             int slot = slots.get(i);
             Listing listing = listings.get(from + i);
-            long remaining = listing.expiresAt() - System.currentTimeMillis();
+
             List<String> lore = new ArrayList<>();
             lore.add("");
+            lore.add("&7Seller: &f" + listing.sellerName());
             if (listing.isAuction()) {
                 lore.add("&7Type: &dAuction");
-                lore.add("&7Current bid: &a" + manager.vault().format(listing.displayPrice()));
+                lore.add("&6" + (listing.hasBids() ? "Current bid" : "Starting bid") + ": &e"
+                        + manager.vault().format(listing.displayPrice()) + " coins");
                 lore.add("&7Bids: &f" + listing.bidCount());
+                lore.add("&7Top bidder: &f"
+                        + (listing.topBidderName() == null ? "None" : listing.topBidderName()));
             } else {
                 lore.add("&7Type: &bBuy It Now");
-                lore.add("&7Price: &a" + manager.vault().format(listing.price()));
+                lore.add("&6Buy it now: &e" + manager.vault().format(listing.price()) + " coins");
             }
-            lore.add("&7Ends in: &f" + GuiUtil.timeLeft(remaining));
             lore.add("");
-            lore.add(listing.hasBids() ? "&cCan't cancel — this auction has bids" : "&cRight-click to cancel");
+            lore.add("&7Ends in: &f" + GuiUtil.timeLeft(listing.expiresAt() - System.currentTimeMillis()));
+            lore.add("");
+            lore.add(listing.sellerId().equals(player.getUniqueId())
+                    ? "&7This is your own listing."
+                    : (listing.isAuction() ? "&eClick to bid" : "&eClick to buy"));
+
             ItemStack icon = GuiUtil.appendLore(listing.item(), lore);
             inventory.setItem(slot, icon);
             slotToListing.put(slot, listing);
@@ -83,15 +100,15 @@ public final class ListingsGui extends AuctionGui {
         }
         int slot = event.getSlot();
         if (slotToListing.containsKey(slot)) {
-            if (!event.isRightClick()) {
-                return;
-            }
             Listing listing = slotToListing.get(slot);
-            if (listing.hasBids()) {
-                manager.messages().send(player, "cancel.has-bids");
-                return;
+            if (listing.sellerId().equals(player.getUniqueId())) {
+                return; // can't buy/bid on your own
             }
-            manager.confirmCancel(player, listing, page);
+            if (listing.isAuction()) {
+                manager.openBid(player, listing, null, null, manager.config().defaultSort(), 0);
+            } else {
+                manager.openConfirm(player, listing, null, null, manager.config().defaultSort(), 0);
+            }
             return;
         }
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
@@ -105,6 +122,7 @@ public final class ListingsGui extends AuctionGui {
                 page++;
                 render();
             }
+            case OPEN_HUB -> manager.openHub(player);
             case OPEN_BROWSE -> manager.openBrowse(player);
             case CLOSE -> player.closeInventory();
             default -> {
