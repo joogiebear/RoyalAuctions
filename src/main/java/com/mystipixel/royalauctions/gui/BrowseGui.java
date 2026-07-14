@@ -132,6 +132,7 @@ public final class BrowseGui extends AuctionGui {
         lore.add("&7Seller: &f" + ph.get("seller"));
         if (listing.isAuction()) {
             lore.add("&6" + ph.get("bid_label") + ": &e" + ph.get("price") + " coins");
+            lore.add("&7Top bidder: &f" + ph.get("top_bidder"));
             lore.add("&7Bids: &f" + ph.get("bids"));
         } else {
             lore.add("&6Buy it now: &e" + ph.get("price") + " coins");

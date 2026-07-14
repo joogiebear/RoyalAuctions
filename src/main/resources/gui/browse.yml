@@ -99,6 +99,7 @@ listing-lore:
     - ""
     - "&7Seller: &f{seller}"
     - "&6{bid_label}: &e{price} coins"
+    - "&7Top bidder: &f{top_bidder}"
     - "&7Bids: &f{bids}"
     - ""
     - "&7Ends in: &f{ends_in}"
