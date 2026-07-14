@@ -81,6 +81,18 @@ slots:
           pitch: 1
           volume: 1
 
+  - id: collection
+    item: ender_chest hide_attributes name:"&dCollection"
+    lore:
+      - "&7Claim purchases and returned items."
+      - ""
+      - "&eClick to open!"
+    location:
+      row: 4
+      column: 4
+    left-click:
+      - id: ah_collection
+
   - id: create
     item: paper hide_attributes name:"&aCreate Auction"
     lore:
