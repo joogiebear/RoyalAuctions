@@ -5,7 +5,8 @@
 
     <groupId>com.mystipixel</groupId>
     <artifactId>royalauctions</artifactId>
-    <version>1.3.2</version>
+    <!-- eco-style YYYY.WW versioning. Release builds override this from the git tag. -->
+    <version>2026.28</version>
     <packaging>jar</packaging>
 
     <name>RoyalAuctions</name>
