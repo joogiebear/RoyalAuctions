@@ -1,0 +1,33 @@
+# Confirm Purchase (Buy It Now). Placeholders: {price} {seller}
+title: "&8Confirm Purchase"
+rows: 3
+filler:
+  enabled: true
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+sounds:
+  success:
+    enabled: true
+    name: ENTITY_EXPERIENCE_ORB_PICKUP
+    volume: 0.8
+    pitch: 1.4
+items:
+  item:
+    slot: 14
+    material: PAPER
+    name: "&fItem"
+    action: NONE
+  confirm:
+    slot: 12
+    material: LIME_STAINED_GLASS_PANE
+    name: "&aConfirm Purchase"
+    lore:
+      - "&7Buy for &a{price}"
+    action: CONFIRM_PURCHASE
+  cancel:
+    slot: 16
+    material: RED_STAINED_GLASS_PANE
+    name: "&cCancel"
+    lore:
+      - "&7Return to the Auction House"
+    action: OPEN_BROWSE

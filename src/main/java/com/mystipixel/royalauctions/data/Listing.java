@@ -1,0 +1,142 @@
+package com.mystipixel.royalauctions.data;
+
+import org.bukkit.inventory.ItemStack;
+
+import java.util.UUID;
+
+/**
+ * One auction listing. {@code itemData} is the source of truth for the item; the decoded
+ * {@link ItemStack} is cached lazily. For {@link ListingType#BIN} listings {@code price} is the
+ * buy-now price. For {@link ListingType#AUCTION} listings {@code price} is the starting bid and
+ * {@code currentBid}/{@code topBidder*} track the leading bid ({@code bidCount == 0} means none yet).
+ */
+public final class Listing {
+
+    private final UUID id;
+    private final UUID sellerId;
+    private final String sellerName;
+    private final byte[] itemData;
+    private final String displayName;
+    private final String category;
+    private final ListingType type;
+    private final double price;
+    private final long createdAt;
+    private final long expiresAt;
+    private ListingStatus status;
+
+    private final double currentBid;
+    private final UUID topBidderId;
+    private final String topBidderName;
+    private final int bidCount;
+
+    private transient ItemStack cachedItem;
+
+    public Listing(UUID id, UUID sellerId, String sellerName, byte[] itemData, String displayName,
+                   String category, ListingType type, double price, long createdAt, long expiresAt,
+                   ListingStatus status, double currentBid, UUID topBidderId, String topBidderName, int bidCount) {
+        this.id = id;
+        this.sellerId = sellerId;
+        this.sellerName = sellerName;
+        this.itemData = itemData;
+        this.displayName = displayName;
+        this.category = category;
+        this.type = type;
+        this.price = price;
+        this.createdAt = createdAt;
+        this.expiresAt = expiresAt;
+        this.status = status;
+        this.currentBid = currentBid;
+        this.topBidderId = topBidderId;
+        this.topBidderName = topBidderName;
+        this.bidCount = bidCount;
+    }
+
+    public UUID id() {
+        return id;
+    }
+
+    public UUID sellerId() {
+        return sellerId;
+    }
+
+    public String sellerName() {
+        return sellerName;
+    }
+
+    public byte[] itemData() {
+        return itemData;
+    }
+
+    public String displayName() {
+        return displayName;
+    }
+
+    public String category() {
+        return category;
+    }
+
+    public ListingType type() {
+        return type;
+    }
+
+    public double price() {
+        return price;
+    }
+
+    public long createdAt() {
+        return createdAt;
+    }
+
+    public long expiresAt() {
+        return expiresAt;
+    }
+
+    public ListingStatus status() {
+        return status;
+    }
+
+    public void status(ListingStatus status) {
+        this.status = status;
+    }
+
+    public double currentBid() {
+        return currentBid;
+    }
+
+    public UUID topBidderId() {
+        return topBidderId;
+    }
+
+    public String topBidderName() {
+        return topBidderName;
+    }
+
+    public int bidCount() {
+        return bidCount;
+    }
+
+    public boolean isAuction() {
+        return type == ListingType.AUCTION;
+    }
+
+    public boolean hasBids() {
+        return bidCount > 0 && topBidderId != null;
+    }
+
+    /** The amount shown to buyers: the leading bid for a live auction, otherwise the base price. */
+    public double displayPrice() {
+        return isAuction() && hasBids() ? currentBid : price;
+    }
+
+    /** Minimum acceptable next bid given the configured increment. */
+    public double nextMinBid(double increment) {
+        return hasBids() ? currentBid + increment : price;
+    }
+
+    public ItemStack item() {
+        if (cachedItem == null) {
+            cachedItem = ItemSerialization.deserialize(itemData);
+        }
+        return cachedItem.clone();
+    }
+}

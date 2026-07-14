@@ -1,0 +1,36 @@
+name: RoyalAuctions
+version: ${version}
+main: com.mystipixel.royalauctions.RoyalAuctionsPlugin
+api-version: '1.21'
+author: Mystipixel
+description: Hypixel-style Auction House with full eco-suite item compatibility.
+depend:
+  - Vault
+softdepend:
+  - eco
+  - EcoItems
+  - EcoArmor
+  - Talismans
+  - Reforges
+  - PlaceholderAPI
+  - EconGuard
+# JDBC + connection pool are downloaded at runtime by Paper's library loader.
+libraries:
+  - org.xerial:sqlite-jdbc:3.46.1.3
+  - com.zaxxer:HikariCP:5.1.0
+  - com.mysql:mysql-connector-j:8.4.0
+commands:
+  auctionhouse:
+    description: Open and manage the Auction House.
+    usage: /ah [sell <price>|search <query>|collect|listings|reload]
+    aliases: [ah, auctions, auction]
+permissions:
+  royalauctions.use:
+    description: Open and browse the Auction House.
+    default: true
+  royalauctions.sell:
+    description: List items for sale.
+    default: true
+  royalauctions.admin:
+    description: Reload config and manage any listing.
+    default: op

@@ -1,0 +1,34 @@
+# Place Bid. Placeholders: {min_bid} {current_bid} {seller}
+title: "&8Place Bid"
+rows: 3
+filler:
+  enabled: true
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+items:
+  item:
+    slot: 14
+    material: PAPER
+    name: "&fItem"
+    action: NONE
+  bid-min:
+    slot: 12
+    material: LIME_STAINED_GLASS_PANE
+    name: "&aBid {min_bid}"
+    lore:
+      - "&7The minimum next bid"
+    action: BID_MIN
+  bid-custom:
+    slot: 16
+    material: OAK_SIGN
+    name: "&eCustom Amount"
+    lore:
+      - "&7Type your own bid in chat"
+    action: BID_CUSTOM
+  back:
+    slot: 23
+    material: OAK_DOOR
+    name: "&eBack"
+    lore:
+      - "&7Return to the Auction House"
+    action: OPEN_BROWSE

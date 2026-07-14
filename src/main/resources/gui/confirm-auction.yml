@@ -1,0 +1,27 @@
+# Confirm Auction (final review before posting). Placeholders: {type} {price} {duration} {fee}
+title: "&8Confirm Auction"
+rows: 3
+filler:
+  enabled: true
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+items:
+  item:
+    slot: 14
+    material: PAPER
+    name: "&fItem"
+    action: NONE
+  confirm:
+    slot: 12
+    material: LIME_STAINED_GLASS_PANE
+    name: "&aConfirm Auction"
+    lore:
+      - "&7Post it and pay the &c{fee} &7fee"
+    action: CONFIRM
+  cancel:
+    slot: 16
+    material: RED_STAINED_GLASS_PANE
+    name: "&cBack"
+    lore:
+      - "&7Return to editing"
+    action: BACK

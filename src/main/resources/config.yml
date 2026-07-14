@@ -1,0 +1,194 @@
+# =====================================================================
+#  RoyalAuctions - Hypixel-style Auction House
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Storage
+#   type: SQLITE (single server, zero setup) or MYSQL (network / shared)
+# ---------------------------------------------------------------------
+storage:
+  type: SQLITE
+  # Only used when type: MYSQL
+  mysql:
+    host: localhost
+    port: 3306
+    database: royalauctions
+    username: root
+    password: ""
+    # Extra JDBC params appended to the connection URL.
+    properties: "useSSL=false&characterEncoding=utf8&allowPublicKeyRetrieval=true"
+    pool-size: 10
+  # SQLite file name (stored in the plugin folder). Only used when type: SQLITE.
+  sqlite-file: auctions.db
+
+# ---------------------------------------------------------------------
+# Listing rules
+# ---------------------------------------------------------------------
+listings:
+  # Auctions/listings are created entirely through the GUI (open with /ah, click
+  # "Create Auction"). The seller deposits the item, sets a price by typing it in
+  # chat, picks a duration, toggles Buy-It-Now vs Auction, then confirms.
+
+  # Selectable listing durations shown on the "Auction Duration" screen.
+  durations:
+    - label: "1 Hour"
+      hours: 1
+      icon: RED_TERRACOTTA
+    - label: "6 Hours"
+      hours: 6
+      icon: ORANGE_TERRACOTTA
+    - label: "12 Hours"
+      hours: 12
+      icon: YELLOW_TERRACOTTA
+    - label: "1 Day"
+      hours: 24
+      icon: LIME_TERRACOTTA
+    - label: "2 Days"
+      hours: 48
+      icon: PINK_TERRACOTTA
+  # Duration a new listing defaults to (must match one of the hours values above).
+  default-duration-hours: 24
+  # Default type a new listing opens as: BIN (buy-it-now) or AUCTION (bidding).
+  default-type: BIN
+  # Maximum active listings a player may have at once (permission
+  # royalauctions.limit.<n> overrides this; -1 = unlimited).
+  max-per-player: 7
+  # Price bounds (in Vault currency). max-price: -1 disables the upper bound.
+  min-price: 1.0
+  max-price: -1
+  # Listing fee charged to the seller when posting.
+  #   percent: fraction of the sale price (0.02 = 2%)
+  #   minimum: floor for the fee regardless of percent
+  # The fee is non-refundable and is taken immediately on listing.
+  fee:
+    percent: 0.02
+    minimum: 5.0
+  # If true, buying an item deposits it straight into the buyer's inventory
+  # when there is room, only overflowing to the collection when full.
+  # If false, all purchases go to the collection to be claimed manually.
+  instant-deliver-purchases: true
+
+# ---------------------------------------------------------------------
+# Bidding (AUCTION listings)
+# ---------------------------------------------------------------------
+bidding:
+  # Each new bid must beat the current bid by at least the larger of a flat
+  # amount and a percentage of the current bid.
+  min-increment: 10.0
+  increment-percent: 0.05
+  # When someone is outbid their money is refunded automatically. When an
+  # auction ends the highest bidder wins and the seller is paid the winning bid.
+
+# ---------------------------------------------------------------------
+# GUI / Menus
+#
+# Every menu — its title, size, filler, sounds, and each button's slot,
+# material, name, lore and click action — is configured per-menu in the
+# gui/ folder:
+#   gui/browse.yml           the Auction Browser
+#   gui/create.yml           the Create Auction screen
+#   gui/duration.yml         the Auction Duration picker
+#   gui/confirm-purchase.yml Buy-It-Now confirmation
+#   gui/confirm-auction.yml  final auction confirmation
+#   gui/bid.yml              the Place Bid screen
+#   gui/collection.yml       claim purchases / returned items
+#   gui/manage.yml           your active listings
+# Edit those files and run /ah reload to apply changes.
+# ---------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# Categories (Hypixel-style tabs)
+#
+# Items are tested against each category in ascending `priority` order and
+# placed in the FIRST one that matches. Always keep a final catch-all
+# category (a `misc` with match.any: true) so nothing is uncategorised.
+#
+# Match rules (any rule that is present must be satisfied; a category with
+# multiple rule types matches if ANY rule type matches):
+#   eco-namespaces   : list of eco plugin namespaces the item belongs to,
+#                      e.g. [talismans], [reforges], [ecoarmor], [ecoitems]
+#   materials        : exact Bukkit material names
+#   material-suffixes: material name ends with any of these (e.g. _SWORD)
+#   material-prefixes: material name starts with any of these
+#   tags             : built-in flags: EDIBLE, BLOCK, ARMOR, TOOL, WEAPON
+#   any              : true = catch-all (matches everything)
+# ---------------------------------------------------------------------
+categories:
+  weapons:
+    display-name: "&cWeapons"
+    icon: DIAMOND_SWORD
+    priority: 10
+    match:
+      material-suffixes: ["_SWORD", "_AXE"]
+      materials: ["BOW", "CROSSBOW", "TRIDENT", "MACE"]
+      tags: ["WEAPON"]
+
+  armor:
+    display-name: "&9Armor"
+    icon: DIAMOND_CHESTPLATE
+    priority: 20
+    match:
+      eco-namespaces: ["ecoarmor"]
+      material-suffixes: ["_HELMET", "_CHESTPLATE", "_LEGGINGS", "_BOOTS"]
+      materials: ["ELYTRA", "SHIELD", "TURTLE_HELMET"]
+      tags: ["ARMOR"]
+
+  tools:
+    display-name: "&eTools"
+    icon: DIAMOND_PICKAXE
+    priority: 30
+    match:
+      material-suffixes: ["_PICKAXE", "_SHOVEL", "_HOE"]
+      materials: ["SHEARS", "FISHING_ROD", "FLINT_AND_STEEL", "BRUSH", "SPYGLASS"]
+      tags: ["TOOL"]
+
+  talismans:
+    display-name: "&dTalismans"
+    icon: EMERALD
+    priority: 40
+    match:
+      eco-namespaces: ["talismans"]
+
+  reforge_stones:
+    display-name: "&6Reforge Stones"
+    icon: ANVIL
+    priority: 50
+    match:
+      eco-namespaces: ["reforges"]
+
+  enchanted_books:
+    display-name: "&bEnchanted Books"
+    icon: ENCHANTED_BOOK
+    priority: 60
+    match:
+      materials: ["ENCHANTED_BOOK", "BOOK"]
+
+  consumables:
+    display-name: "&aConsumables"
+    icon: GOLDEN_APPLE
+    priority: 70
+    match:
+      materials: ["POTION", "SPLASH_POTION", "LINGERING_POTION", "EXPERIENCE_BOTTLE"]
+      tags: ["EDIBLE"]
+
+  blocks:
+    display-name: "&2Blocks"
+    icon: GRASS_BLOCK
+    priority: 80
+    match:
+      tags: ["BLOCK"]
+
+  misc:
+    display-name: "&7Miscellaneous"
+    icon: CHEST
+    priority: 999
+    match:
+      any: true
+
+# ---------------------------------------------------------------------
+# Sorting for the browse screen. Options: NEWEST, OLDEST, PRICE_LOW, PRICE_HIGH
+# ---------------------------------------------------------------------
+default-sort: NEWEST
+
+# How often (in minutes) the plugin sweeps for expired listings.
+expiry-sweep-minutes: 5

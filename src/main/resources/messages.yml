@@ -1,0 +1,66 @@
+# All messages support & colour codes and the {prefix} placeholder.
+prefix: "&6&lAH &8» &r"
+
+general:
+  no-permission: "{prefix}&cYou don't have permission to do that."
+  player-only: "{prefix}&cOnly players can use this command."
+  reloaded: "{prefix}&aConfiguration reloaded."
+  invalid-number: "{prefix}&cThat's not a valid number."
+
+sell:
+  hand-empty: "{prefix}&cYou must be holding an item to sell it."
+  usage: "{prefix}&cUsage: &f/ah sell <price>"
+  min-price: "{prefix}&cThe minimum listing price is &f{min}&c."
+  max-price: "{prefix}&cThe maximum listing price is &f{max}&c."
+  too-many: "{prefix}&cYou already have the maximum of &f{max}&c active listings."
+  cannot-afford-fee: "{prefix}&cYou need &f{fee}&c to cover the listing fee."
+  blacklisted: "{prefix}&cThat item cannot be sold on the Auction House."
+  success: "{prefix}&aListed &f{item} &afor &f{price}&a. &7(fee: {fee})"
+
+buy:
+  cannot-afford: "{prefix}&cYou can't afford &f{price}&c."
+  gone: "{prefix}&cThat listing is no longer available."
+  own-listing: "{prefix}&cYou can't buy your own listing."
+  inventory-full-collection: "{prefix}&eYour inventory was full — the item was sent to your &f/ah collect&e."
+  success: "{prefix}&aPurchased &f{item} &afor &f{price}&a."
+  sold-notify: "{prefix}&a{buyer} &abought your &f{item} &afor &f{price}&a."
+
+cancel:
+  success: "{prefix}&aListing cancelled — the item is in your &f/ah collect&a."
+  not-yours: "{prefix}&cThat isn't your listing."
+  gone: "{prefix}&cThat listing is no longer active."
+  has-bids: "{prefix}&cYou can't cancel an auction that already has bids."
+
+collection:
+  empty: "{prefix}&7Your collection is empty."
+  full-inventory: "{prefix}&cYour inventory is full — make room first."
+  claimed: "{prefix}&aClaimed &f{item}&a."
+
+expiry:
+  expired-notify: "{prefix}&e{count} &7of your listings expired and were returned to &f/ah collect&7."
+
+search:
+  prompt: "{prefix}&eType your search in chat, or type &fcancel&e to go back."
+  cancelled: "{prefix}&7Search cancelled."
+
+create:
+  price-prompt: "{prefix}&eType the price in chat, or type &fcancel&e to go back."
+  price-set: "{prefix}&aPrice set to &f{price}&a."
+  need-item: "{prefix}&cPlace an item in the slot first."
+  need-price: "{prefix}&cSet a price first."
+  cancelled: "{prefix}&7Auction creation cancelled — your item was returned."
+
+bid:
+  prompt: "{prefix}&eType your bid amount in chat, or type &fcancel&e to go back."
+  own-listing: "{prefix}&cYou can't bid on your own auction."
+  too-low: "{prefix}&cYour bid must be at least &f{min}&c."
+  cannot-afford: "{prefix}&cYou can't afford a bid of &f{amount}&c."
+  placed: "{prefix}&aBid of &f{amount} &aplaced on &f{item}&a."
+  outbid-already: "{prefix}&cSomeone already bid higher — try again."
+  gone: "{prefix}&cThat auction is no longer available."
+  you-were-outbid: "{prefix}&eYou were outbid on &f{item}&e. &f{amount} &erefunded."
+  new-bid-seller: "{prefix}&a{bidder} &abid &f{amount} &aon your &f{item}&a."
+
+auction:
+  won: "{prefix}&aYou won &f{item} &afor &f{amount}&a! Claim it in &f/ah collect&a."
+  sold-seller: "{prefix}&aYour auction for &f{item} &asold to &f{buyer} &afor &f{amount}&a."
