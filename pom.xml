@@ -30,6 +30,10 @@
             <id>placeholderapi</id>
             <url>https://repo.extendedclip.com/content/repositories/placeholderapi/</url>
         </repository>
+        <repository>
+            <id>auxilor</id>
+            <url>https://repo.auxilor.io/repository/maven-public/</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -51,10 +55,8 @@
             <version>2.11.6</version>
             <scope>provided</scope>
         </dependency>
-        <!-- eco platform: soft-dependency. Installed from the server jar into the local repo via:
-             mvn install:install-file -Dfile=<server>/plugins/eco-2026.28-polymart.jar
-               -DgroupId=com.willfp -DartifactId=eco -Dversion=2026.28 -Dpackaging=jar
-             Compile against it for the Items category API; runtime guarded by isPluginEnabled("eco"). -->
+        <!-- eco platform: soft-dependency, resolved from the Auxilor repo (see <repositories>).
+             Compiled against for the Items category API; runtime guarded by isPluginEnabled("eco"). -->
         <dependency>
             <groupId>com.willfp</groupId>
             <artifactId>eco</artifactId>

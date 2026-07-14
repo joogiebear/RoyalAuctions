@@ -55,18 +55,16 @@ matches. A rule matches if **any** of its predicate types matches:
 
 ## Building
 
-Requires the `eco` API in your local Maven repo (installed from the server jar):
-
 ```bash
-mvn install:install-file \
-  -Dfile=/path/to/plugins/eco-2026.28-polymart.jar \
-  -DgroupId=com.willfp -DartifactId=eco -Dversion=2026.28 -Dpackaging=jar
-
 mvn -DskipTests package
 ```
 
-The JDBC driver and connection pool are downloaded at runtime by Paper's library loader,
-so the output jar stays small.
+All dependencies (including the `eco` API, from the Auxilor repo) resolve automatically —
+no manual install step needed. The JDBC driver and connection pool are downloaded at runtime
+by Paper's library loader, so the output jar stays small.
+
+CI builds the jar on every push via [`.github/workflows/build.yml`](.github/workflows/build.yml)
+(JDK 21) and uploads it as a build artifact.
 
 ## Requirements
 
