@@ -8,7 +8,7 @@
 # Placeholders: %total_bids% %top_bids% %outbid% %my_listings% %active% %player%
 
 title: "&8Auction House"
-rows: 3
+rows: 4
 
 mask:
   items:
@@ -18,10 +18,11 @@ mask:
     - "222222222"
     - "211111112"
     - "222222222"
+    - "222222222"
 
 slots:
   - id: browse
-    item: chest hide_attributes name:"&6&lAuction Browser"
+    item: gold_block hide_attributes name:"&6&lAuction Browser"
     lore:
       - "&7Browse every auction and"
       - "&7buy-it-now listing on the server."
@@ -41,7 +42,7 @@ slots:
           volume: 1
 
   - id: bids
-    item: gold_ingot hide_attributes name:"&e&lView Bids"
+    item: golden_carrot hide_attributes name:"&e&lView Bids"
     lore:
       - "&7Every auction you have bid on."
       - ""
@@ -61,7 +62,7 @@ slots:
           volume: 1
 
   - id: manage
-    item: writable_book hide_attributes name:"&a&lManage Auctions"
+    item: golden_horse_armor hide_attributes name:"&a&lManage Auctions"
     lore:
       - "&7View, and cancel, the auctions"
       - "&7you have listed."
@@ -80,26 +81,14 @@ slots:
           pitch: 1
           volume: 1
 
-  - id: collection
-    item: ender_chest hide_attributes name:"&dCollection"
-    lore:
-      - "&7Claim purchases and returned items."
-      - ""
-      - "&eClick to open!"
-    location:
-      row: 3
-      column: 4
-    left-click:
-      - id: ah_collection
-
   - id: create
-    item: anvil hide_attributes name:"&aCreate Auction"
+    item: paper hide_attributes name:"&aCreate Auction"
     lore:
       - "&7List an item for sale or auction."
       - ""
       - "&eClick to create!"
     location:
-      row: 3
+      row: 4
       column: 6
     left-click:
       - id: ah_create
@@ -108,7 +97,7 @@ slots:
     item: barrier name:"&cClose"
     lore: []
     location:
-      row: 3
+      row: 4
       column: 5
     left-click:
       - id: close_inventory
