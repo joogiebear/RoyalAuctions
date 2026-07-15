@@ -93,7 +93,12 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         }
         fullyEnabled = true;
 
-        this.service = new AuctionService(this, database, vault, config, categories, tiers, messages);
+        com.mystipixel.royalauctions.hooks.EconGuardHook econGuard =
+                new com.mystipixel.royalauctions.hooks.EconGuardHook();
+        if (econGuard.isPresent()) {
+            getLogger().info("EconGuard detected - auction money movements will be reported to the central audit core.");
+        }
+        this.service = new AuctionService(this, database, vault, config, categories, tiers, messages, econGuard);
         this.menus = new MenuManager(this);
         SignInput signInput = new SignInput(this);
         getServer().getPluginManager().registerEvents(signInput, this);

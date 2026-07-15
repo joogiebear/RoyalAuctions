@@ -39,13 +39,14 @@ public final class AuctionService {
     private final CategoryManager categories;
     private final com.mystipixel.royalauctions.tier.TierManager tiers;
     private final MessageManager messages;
+    private final com.mystipixel.royalauctions.hooks.EconGuardHook econGuard;
 
     /** Cheap cached count for placeholders; refreshed by the expiry sweep and on demand. */
     private volatile int activeCache = 0;
 
     public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
                           CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
-                          MessageManager messages) {
+                          MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard) {
         this.plugin = plugin;
         this.db = db;
         this.vault = vault;
@@ -53,6 +54,7 @@ public final class AuctionService {
         this.categories = categories;
         this.tiers = tiers;
         this.messages = messages;
+        this.econGuard = econGuard;
     }
 
     // ------------------------------------------------------------------ scheduling helpers
@@ -211,10 +213,17 @@ public final class AuctionService {
             return;
         }
 
+        // Report the bid's escrow debit to EconGuard (counterparty = seller) so bid velocity and
+        // buyer<->seller links are visible to the central abuse analysis.
+        econGuard.report(bidder.getUniqueId(), bidder.getName(), "bid", amount, false,
+                listing.sellerId(), listing.sellerName(), listing.displayName());
+
         // Refund whoever we just outbid.
         if (outcome.previousBidderId != null) {
             OfflinePlayer prev = Bukkit.getOfflinePlayer(outcome.previousBidderId);
             vault.deposit(prev, outcome.previousBid);
+            econGuard.report(outcome.previousBidderId, outcome.previousBidderName, "bid-refund",
+                    outcome.previousBid, true, null, null, listing.displayName());
             Player prevOnline = Bukkit.getPlayer(outcome.previousBidderId);
             if (prevOnline != null) {
                 messages.send(prevOnline, "bid.you-were-outbid",
@@ -282,6 +291,12 @@ public final class AuctionService {
 
         OfflinePlayer seller = Bukkit.getOfflinePlayer(listing.sellerId());
         vault.deposit(seller, price);
+
+        // Both legs of the sale to EconGuard, each naming the other party for RMT / collusion analysis.
+        econGuard.report(buyer.getUniqueId(), buyer.getName(), "buy", price, false,
+                listing.sellerId(), listing.sellerName(), listing.displayName());
+        econGuard.report(listing.sellerId(), listing.sellerName(), "sale", price, true,
+                buyer.getUniqueId(), buyer.getName(), listing.displayName());
 
         ItemStack item = listing.item();
         String display = listing.displayName();
@@ -504,7 +519,12 @@ public final class AuctionService {
                     }
                 });
                 for (AuctionWin win : wins) {
-                    vault.deposit(Bukkit.getOfflinePlayer(win.sellerId()), win.amount());
+                    OfflinePlayer winSeller = Bukkit.getOfflinePlayer(win.sellerId());
+                    vault.deposit(winSeller, win.amount());
+                    // The winner's outflow was already reported when they bid; log the seller's payout,
+                    // naming the winner as counterparty so EconGuard can link the pair.
+                    econGuard.report(win.sellerId(), winSeller.getName(), "auction-sale", win.amount(), true,
+                            win.winnerId(), win.winnerName(), win.itemName());
                     Player seller = Bukkit.getPlayer(win.sellerId());
                     if (seller != null) {
                         messages.send(seller, "auction.sold-seller",
