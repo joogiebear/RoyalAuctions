@@ -43,6 +43,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         this.config = new PluginConfig(this);
+        new com.mystipixel.royalauctions.config.ConfigValidator(this, config).validate();
         this.messages = new MessageManager(this);
         this.vault = new VaultHook();
 
