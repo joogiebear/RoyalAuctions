@@ -24,18 +24,16 @@ slots:
     item: arrow name:"&ePrevious Page"
     lore:
       - "&7Page %page%/%pages%"
-    location:
-      row: 6
-      column: 1
+    row: 6
+    column: 1
     left-click:
       - id: ah_prev_page
 
   - id: back
     item: oak_door name:"&eBack to Auction House"
     lore: []
-    location:
-      row: 6
-      column: 4
+    row: 6
+    column: 4
     left-click:
       - id: ah_hub
 
@@ -45,17 +43,15 @@ slots:
       - "&7Top bidder on &a%top% &7of &f%count%"
       - "&7Outbid: &c%outbid%"
       - "&7Page: &f%page%/%pages%"
-    location:
-      row: 6
-      column: 5
+    row: 6
+    column: 5
     left-click: []
 
   - id: close
     item: barrier name:"&cClose"
     lore: []
-    location:
-      row: 6
-      column: 6
+    row: 6
+    column: 6
     left-click:
       - id: close_inventory
 
@@ -63,8 +59,7 @@ slots:
     item: arrow name:"&eNext Page"
     lore:
       - "&7Page %page%/%pages%"
-    location:
-      row: 6
-      column: 9
+    row: 6
+    column: 9
     left-click:
       - id: ah_next_page

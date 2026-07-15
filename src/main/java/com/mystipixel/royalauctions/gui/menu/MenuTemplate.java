@@ -131,7 +131,7 @@ public final class MenuTemplate {
             if (itemObj == null) {
                 continue;
             }
-            int index = locationIndex(raw.get("location"), size);
+            int index = slotIndex(raw, size);
             if (index < 0) {
                 continue;
             }
@@ -173,18 +173,25 @@ public final class MenuTemplate {
         return MenuAction.NONE;
     }
 
-    /** EcoMenus {@code location: {row, column}} (1-based) → 0-based inventory index. */
-    private static int locationIndex(Object locationObj, int size) {
-        int row = 1;
-        int column = 1;
-        if (locationObj instanceof ConfigurationSection cs) {
-            row = cs.getInt("row", 1);
-            column = cs.getInt("column", 1);
-        } else if (locationObj instanceof Map<?, ?> m) {
-            row = intOf(m.get("row"), 1);
-            column = intOf(m.get("column"), 1);
+    /**
+     * Resolve a slot's 1-based {@code row}/{@code column} into a 0-based inventory index. Row/column sit
+     * directly on the slot (the eco-menus convention); a legacy nested {@code location: {row, column}}
+     * is still accepted as a fallback.
+     */
+    private static int slotIndex(Map<?, ?> raw, int size) {
+        Object rowObj = raw.get("row");
+        Object colObj = raw.get("column");
+        if (rowObj == null && colObj == null) {
+            Object loc = raw.get("location");
+            if (loc instanceof ConfigurationSection cs) {
+                rowObj = cs.get("row");
+                colObj = cs.get("column");
+            } else if (loc instanceof Map<?, ?> m) {
+                rowObj = m.get("row");
+                colObj = m.get("column");
+            }
         }
-        int index = (row - 1) * 9 + (column - 1);
+        int index = (intOf(rowObj, 1) - 1) * 9 + (intOf(colObj, 1) - 1);
         return (index >= 0 && index < size) ? index : -1;
     }
 

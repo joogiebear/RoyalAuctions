@@ -21,9 +21,8 @@ slots:
     lore:
       - "&7Click an item in your inventory"
       - "&7to place it here"
-    location:
-      row: 2
-      column: 5
+    row: 2
+    column: 5
     left-click:
       - id: ah_remove_item
 
@@ -32,9 +31,8 @@ slots:
     lore:
       - "&7Current: &a%price%"
       - "&7Click to type a price"
-    location:
-      row: 4
-      column: 3
+    row: 4
+    column: 3
     left-click:
       - id: ah_set_price
 
@@ -43,9 +41,8 @@ slots:
     lore:
       - "&7Current: &f%duration%"
       - "&7Click to change"
-    location:
-      row: 4
-      column: 5
+    row: 4
+    column: 5
     left-click:
       - id: ah_set_duration
 
@@ -54,9 +51,8 @@ slots:
     lore:
       - "%type_desc%"
       - "%toggle_hint%"
-    location:
-      row: 4
-      column: 7
+    row: 4
+    column: 7
     left-click:
       - id: ah_toggle_type
 
@@ -64,9 +60,8 @@ slots:
     item: lime_stained_glass_pane name:"&aContinue"
     lore:
       - "&7Review and confirm your auction"
-    location:
-      row: 5
-      column: 4
+    row: 5
+    column: 4
     left-click:
       - id: ah_continue
 
@@ -74,9 +69,8 @@ slots:
     item: red_stained_glass_pane name:"&cCancel"
     lore:
       - "&7Return the item and exit"
-    location:
-      row: 5
-      column: 6
+    row: 5
+    column: 6
     left-click:
       - id: ah_cancel
 

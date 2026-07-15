@@ -3,14 +3,18 @@ package com.mystipixel.royalauctions.gui.menu;
 import com.mystipixel.royalauctions.hooks.EcoHook;
 import com.mystipixel.royalauctions.util.Text;
 import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Parses the EcoMenus inline item syntax used throughout {@code gui/*.yml}, e.g.
@@ -23,23 +27,30 @@ public final class ItemSpec {
 
     private final String lookupId;
     private final String rawName;   // nullable
+    private final String texture;   // base64 head texture, nullable
+    private final String head;      // player-head owner name/%placeholder%, nullable
     private final boolean hideEnchants;
     private final boolean hideAttributes;
 
-    private ItemSpec(String lookupId, String rawName, boolean hideEnchants, boolean hideAttributes) {
+    private ItemSpec(String lookupId, String rawName, String texture, String head,
+                     boolean hideEnchants, boolean hideAttributes) {
         this.lookupId = lookupId;
         this.rawName = rawName;
+        this.texture = texture;
+        this.head = head;
         this.hideEnchants = hideEnchants;
         this.hideAttributes = hideAttributes;
     }
 
     public static ItemSpec parse(String raw) {
         if (raw == null || raw.isBlank()) {
-            return new ItemSpec("stone", null, false, false);
+            return new ItemSpec("stone", null, null, null, false, false);
         }
         List<String> tokens = tokenize(raw.trim());
         String lookup = tokens.isEmpty() ? "stone" : tokens.get(0);
         String name = null;
+        String texture = null;
+        String head = null;
         boolean hideEnch = false;
         boolean hideAttr = false;
         for (int i = 1; i < tokens.size(); i++) {
@@ -50,9 +61,13 @@ public final class ItemSpec {
                 hideAttr = true;
             } else if (t.regionMatches(true, 0, "name:", 0, 5)) {
                 name = stripQuotes(t.substring(5));
+            } else if (t.regionMatches(true, 0, "texture:", 0, 8)) {
+                texture = stripQuotes(t.substring(8));
+            } else if (t.regionMatches(true, 0, "head:", 0, 5)) {
+                head = stripQuotes(t.substring(5));
             }
         }
-        return new ItemSpec(lookup, name, hideEnch, hideAttr);
+        return new ItemSpec(lookup, name, texture, head, hideEnch, hideAttr);
     }
 
     /** Build the stack: resolve the lookup, fill placeholders in name/lore, and stamp the click action. */
@@ -96,9 +111,28 @@ public final class ItemSpec {
             meta.getPersistentDataContainer().set(MenuKeys.ACTION, PersistentDataType.STRING, leftAction.name());
             meta.getPersistentDataContainer().set(MenuKeys.ACTION_RIGHT, PersistentDataType.STRING,
                     rightAction.name());
+            applyHeadTexture(item, meta, placeholders);
             item.setItemMeta(meta);
         }
         return item;
+    }
+
+    /** Apply a base64 {@code texture:} or a {@code head:} owner to a player-head, the eco-suite way. */
+    private void applyHeadTexture(ItemStack item, ItemMeta meta, Map<String, String> placeholders) {
+        if (item.getType() != Material.PLAYER_HEAD || !(meta instanceof SkullMeta skull)) {
+            return;
+        }
+        try {
+            if (texture != null && !texture.isBlank()) {
+                com.destroystokyo.paper.profile.PlayerProfile profile = Bukkit.createProfile(UUID.randomUUID());
+                profile.setProperty(new com.destroystokyo.paper.profile.ProfileProperty("textures", texture));
+                skull.setPlayerProfile(profile);
+            } else if (head != null && !head.isBlank()) {
+                skull.setOwningPlayer(Bukkit.getOfflinePlayer(apply(head, placeholders)));
+            }
+        } catch (Throwable ignored) {
+            // a malformed texture must never break the menu
+        }
     }
 
     /** If the whole lore line is a single {@code %list%} placeholder, return its lines; else null. */

@@ -38,9 +38,8 @@ slots:
     item: arrow name:"&ePrevious Page"
     lore:
       - "&7Page %page%/%pages%"
-    location:
-      row: 6
-      column: 3
+    row: 6
+    column: 3
     left-click:
       - id: ah_prev_page
 
@@ -50,9 +49,8 @@ slots:
       - "&7Current: &f%search%"
       - ""
       - "&eClick to search by name"
-    location:
-      row: 6
-      column: 4
+    row: 6
+    column: 4
     left-click:
       - id: ah_search
 
@@ -60,9 +58,8 @@ slots:
     item: arrow name:"&eBack"
     lore:
       - "&7Return to the Auction House menu."
-    location:
-      row: 6
-      column: 5
+    row: 6
+    column: 5
     left-click:
       - id: ah_hub
 
@@ -71,9 +68,8 @@ slots:
     item: 'hopper name:"&eSort: &f%sort%"'
     lore:
       - "&7Click to change sorting."
-    location:
-      row: 6
-      column: 6
+    row: 6
+    column: 6
     left-click:
       - id: ah_sort
 
@@ -92,9 +88,8 @@ slots:
       - ""
       - "&eLeft-click &7to go up"
       - "&eRight-click &7to go down"
-    location:
-      row: 6
-      column: 7
+    row: 6
+    column: 7
     left-click:
       - id: ah_tier_prev
     right-click:
@@ -110,9 +105,8 @@ slots:
       - ""
       - "&eLeft-click &7to go up"
       - "&eRight-click &7to go down"
-    location:
-      row: 6
-      column: 8
+    row: 6
+    column: 8
     left-click:
       - id: ah_type_prev
     right-click:
@@ -122,9 +116,8 @@ slots:
     item: arrow name:"&eNext Page"
     lore:
       - "&7Page %page%/%pages%"
-    location:
-      row: 6
-      column: 9
+    row: 6
+    column: 9
     left-click:
       - id: ah_next_page
 
