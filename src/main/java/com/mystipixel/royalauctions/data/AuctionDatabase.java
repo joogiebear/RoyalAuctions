@@ -157,11 +157,20 @@ public final class AuctionDatabase {
     }
 
     private void addColumn(Statement st, String column, String definition) {
-        // ALTER TABLE ... ADD COLUMN throws if the column already exists; that's the "already migrated" case.
+        // Ask the metadata whether the column exists, rather than ALTERing and swallowing the error.
+        // Swallowing treats a genuinely-failed migration as "already there" — the schema ends up
+        // missing the column while boot looks healthy, and every read then fails "column not found".
+        // That exact trap cost RoyalSkyblock a live outage this week; don't repeat it here.
         try {
+            try (ResultSet rs = st.getConnection().getMetaData().getColumns(null, null, "ra_listings", column)) {
+                if (rs.next()) {
+                    return;                     // already present
+                }
+            }
             st.executeUpdate("ALTER TABLE ra_listings ADD COLUMN " + column + " " + definition);
-        } catch (SQLException ignored) {
-            // Column already present.
+            logger.info("Migrated ra_listings: added column " + column + ".");
+        } catch (SQLException e) {
+            logger.severe("Migration failed: could not add ra_listings." + column + " — " + e.getMessage());
         }
     }
 
