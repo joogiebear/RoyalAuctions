@@ -564,6 +564,19 @@ public final class AuctionService {
 
     // ------------------------------------------------------------------ helpers
 
+    /**
+     * Escrow an item into its owner's collection <em>on the calling thread</em>.
+     *
+     * <p>For the shutdown drain only. The normal {@link #storeCollection} path defers to the scheduler,
+     * which Bukkit refuses to run for a disabling plugin — the write would be dropped and the item
+     * destroyed. Throws so the caller can log a failure loudly rather than lose the item quietly.
+     */
+    public void escrowToCollection(UUID owner, ItemStack item) throws Exception {
+        db.addCollectionItem(new CollectionItem(UUID.randomUUID(), owner,
+                ItemSerialization.serialize(item), CollectionItem.Reason.CANCELLED,
+                System.currentTimeMillis()));
+    }
+
     private void storeCollection(UUID owner, ItemStack item, CollectionItem.Reason reason) {
         CollectionItem ci = new CollectionItem(UUID.randomUUID(), owner,
                 ItemSerialization.serialize(item), reason, System.currentTimeMillis());

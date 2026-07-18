@@ -224,6 +224,31 @@ public final class GuiManager {
         openBrowse(player);
     }
 
+    /**
+     * Shutdown drain: any item still escrowed in a create-flow goes to its owner's collection so they
+     * can claim it back. Without this, an item deposited into the sell menu exists only in this map and
+     * is destroyed by a restart — the one place the create flow could lose real player property.
+     * Runs synchronously during disable (the scheduler is already gone), and returns how many it saved.
+     */
+    public int drainEscrowToCollection() {
+        int saved = 0;
+        for (Map.Entry<UUID, CreateSession> entry : createSessions.entrySet()) {
+            CreateSession session = entry.getValue();
+            if (session == null || !session.hasItem()) {
+                continue;
+            }
+            try {
+                service.escrowToCollection(entry.getKey(), session.item());
+                saved++;
+            } catch (Exception e) {
+                plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                        "Could not return escrowed auction item for " + entry.getKey(), e);
+            }
+        }
+        createSessions.clear();
+        return saved;
+    }
+
     public void endCreateSession(Player player, boolean refund) {
         CreateSession s = createSessions.remove(player.getUniqueId());
         if (s == null) {

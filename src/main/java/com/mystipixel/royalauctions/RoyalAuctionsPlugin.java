@@ -158,6 +158,15 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (expiryTask != null) {
             expiryTask.cancel();
         }
+        // Return anything still escrowed in a create-flow BEFORE the database closes. An item
+        // deposited into the sell menu lives only in memory until the listing is confirmed, so a
+        // restart at that moment would destroy it outright.
+        if (guiManager != null && database != null) {
+            int returned = guiManager.drainEscrowToCollection();
+            if (returned > 0) {
+                getLogger().info("Returned " + returned + " escrowed auction item(s) to their owners' collection.");
+            }
+        }
         if (placeholderExpansion != null) {
             placeholderExpansion.unregister();
         }
