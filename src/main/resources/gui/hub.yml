@@ -12,13 +12,12 @@ rows: 4
 
 mask:
   items:
-    - gray_stained_glass_pane
     - black_stained_glass_pane
   pattern:
-    - "222222222"
-    - "211111112"
-    - "222222222"
-    - "222222222"
+    - "111111111"
+    - "111111111"
+    - "111111111"
+    - "111111111"
 
 slots:
   - id: browse

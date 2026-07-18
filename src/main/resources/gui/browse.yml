@@ -55,11 +55,11 @@ slots:
       - id: ah_search
 
   - id: back
-    item: arrow name:"&eBack"
+    item: arrow name:"&7« Back"
     lore:
       - "&7Return to the Auction House menu."
     row: 6
-    column: 5
+    column: 4
     left-click:
       - id: ah_hub
 

@@ -6,7 +6,7 @@ rows: 3
 
 mask:
   items:
-    - gray_stained_glass_pane
+    - black_stained_glass_pane
   pattern:
     - "111111111"
     - "111111111"

@@ -5,7 +5,7 @@ rows: 3
 
 mask:
   items:
-    - gray_stained_glass_pane
+    - black_stained_glass_pane
   pattern:
     - "111111111"
     - "111111111"
@@ -38,7 +38,7 @@ slots:
       - id: ah_bid_custom
 
   - id: back
-    item: oak_door name:"&eBack"
+    item: arrow name:"&7« Back"
     lore:
       - "&7Return to the Auction House"
     row: 3

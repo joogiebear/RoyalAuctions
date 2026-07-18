@@ -6,7 +6,7 @@ rows: 6
 
 mask:
   items:
-    - gray_stained_glass_pane
+    - black_stained_glass_pane
   pattern:
     - "000000000"
     - "000000000"
@@ -29,7 +29,7 @@ slots:
       - id: ah_prev_page
 
   - id: back
-    item: oak_door name:"&eBack to Auction House"
+    item: arrow name:"&7« Back"
     lore: []
     row: 6
     column: 4

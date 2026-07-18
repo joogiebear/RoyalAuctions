@@ -17,7 +17,7 @@ regions:
 
 slots:
   - id: back
-    item: oak_door name:"&eBack"
+    item: arrow name:"&7« Back"
     lore:
       - "&7Return to Create Auction"
     row: 3
