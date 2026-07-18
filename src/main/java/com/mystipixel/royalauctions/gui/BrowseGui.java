@@ -2,6 +2,9 @@ package com.mystipixel.royalauctions.gui;
 
 import com.mystipixel.royalauctions.category.Category;
 import com.mystipixel.royalauctions.data.Listing;
+import com.mystipixel.royalauctions.data.ListingType;
+import com.mystipixel.royalauctions.data.ListingQuery;
+import com.mystipixel.royalauctions.data.ListingPage;
 import com.mystipixel.royalauctions.data.SortOrder;
 import com.mystipixel.royalauctions.gui.menu.MenuTemplate;
 import com.mystipixel.royalauctions.tier.Tier;
@@ -15,7 +18,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -60,7 +62,8 @@ public final class BrowseGui extends AuctionGui {
     private String tier;
     private TypeFilter typeFilter = TypeFilter.ALL;
 
-    private List<Listing> allActive = new ArrayList<>();
+    /** Bumped per fetch so a late response for an older view is discarded instead of drawn. */
+    private int latestRequest;
     private final Map<Integer, Listing> slotToListing = new HashMap<>();
     private final Map<Integer, String> slotToCategory = new HashMap<>();
     private final List<Category> tabs;
@@ -76,53 +79,64 @@ public final class BrowseGui extends AuctionGui {
         this.inventory = Bukkit.createInventory(this, template.size(), Text.color(template.title(Map.of())));
     }
 
-    public void populate(List<Listing> listings, int page) {
-        this.allActive = listings;
+    public void populate(int page) {
         this.page = Math.max(0, page);
         render();
     }
 
-    private List<Listing> filtered() {
-        String query = search == null ? null : search.toLowerCase(Locale.ROOT);
-        List<Listing> out = new ArrayList<>();
-        for (Listing l : allActive) {
-            if (category != null && !category.equalsIgnoreCase(l.category())) {
-                continue;
-            }
-            if (tier != null && !tier.equalsIgnoreCase(l.tier())) {
-                continue;
-            }
-            if (typeFilter == TypeFilter.BIN && l.isAuction()) {
-                continue;
-            }
-            if (typeFilter == TypeFilter.AUCTION && !l.isAuction()) {
-                continue;
-            }
-            if (query != null && !l.displayName().toLowerCase(Locale.ROOT).contains(query)) {
-                continue;
-            }
-            out.add(l);
-        }
-        out.sort(sort.comparator());
-        return out;
+    /** The current filter state as a database query. */
+    private ListingQuery query() {
+        ListingType typed = switch (typeFilter) {
+            case BIN -> ListingType.BIN;
+            case AUCTION -> ListingType.AUCTION;
+            case ALL -> null;
+        };
+        return new ListingQuery(category, tier, typed, search, sort);
     }
 
+    /**
+     * Fetch the current page and draw it. Filtering and sorting happen in the database now, so every
+     * filter change and page turn goes through here.
+     *
+     * <p>The result arrives later, by which time the player may have clicked something else or closed
+     * the menu, so each request carries a sequence number and only the newest one is allowed to draw.
+     * Without that, a slow response for page 1 could land after page 2 and silently rewind the view.
+     */
     private void render() {
+        int requestId = ++latestRequest;
+        int perPage = Math.max(1, template.slots("content-slots").size());
+        manager.service().loadBrowsePage(query(), page, perPage, result -> {
+            if (requestId != latestRequest || !stillOpen()) {
+                return;
+            }
+            int pages = result.pageCount(perPage);
+            if (page >= pages) {
+                // Filters shrank the result set out from under the current page — step back and refetch.
+                page = pages - 1;
+                render();
+                return;
+            }
+            draw(result, perPage);
+        });
+    }
+
+    /** True while this menu is still the one the player has open. */
+    private boolean stillOpen() {
+        return player.isOnline() && inventory.equals(player.getOpenInventory().getTopInventory());
+    }
+
+    private void draw(ListingPage result, int perPage) {
         inventory.clear();
         slotToListing.clear();
         slotToCategory.clear();
 
         List<Integer> contentSlots = template.slots("content-slots");
-        int perPage = Math.max(1, contentSlots.size());
-        List<Listing> results = filtered();
-        int pages = Math.max(1, (int) Math.ceil(results.size() / (double) perPage));
-        if (page >= pages) {
-            page = pages - 1;
-        }
+        List<Listing> results = result.rows();
+        int pages = result.pageCount(perPage);
 
         Map<String, String> placeholders = new HashMap<>();
         placeholders.put("category", category == null ? "All" : displayNameOf(category));
-        placeholders.put("count", String.valueOf(results.size()));
+        placeholders.put("count", String.valueOf(result.total()));
         placeholders.put("page", String.valueOf(page + 1));
         placeholders.put("pages", String.valueOf(pages));
         placeholders.put("search", search == null ? "None" : search);
@@ -136,10 +150,9 @@ public final class BrowseGui extends AuctionGui {
         lists.put("type_list", typeList());
         template.applyStatic(inventory, placeholders, lists);
 
-        int from = page * perPage;
-        for (int i = 0; i < perPage && from + i < results.size(); i++) {
+        for (int i = 0; i < perPage && i < results.size(); i++) {
             int slot = contentSlots.get(i);
-            Listing listing = results.get(from + i);
+            Listing listing = results.get(i);
             inventory.setItem(slot, listingIcon(listing));
             slotToListing.put(slot, listing);
         }

@@ -12,6 +12,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -147,6 +148,12 @@ public final class AuctionDatabase {
             createIndex(st, "idx_ra_listings_status", "ra_listings(status)");
             createIndex(st, "idx_ra_listings_seller", "ra_listings(seller_id)");
             createIndex(st, "idx_ra_collection_owner", "ra_collection(owner_id)");
+            // Composites matching how the hot queries actually filter and sort, so the planner can serve
+            // them from the index instead of scanning every listing and sorting the result.
+            createIndex(st, "idx_ra_listings_status_created", "ra_listings(status, created_at)");
+            createIndex(st, "idx_ra_listings_status_seller", "ra_listings(status, seller_id)");
+            createIndex(st, "idx_ra_listings_status_expires", "ra_listings(status, expires_at)");
+            createIndex(st, "idx_ra_collection_owner_created", "ra_collection(owner_id, created_at)");
             createIndex(st, "idx_ra_bids_bidder", "ra_bids(bidder_id)");
             createIndex(st, "idx_ra_bids_listing", "ra_bids(listing_id)");
         }
@@ -175,16 +182,31 @@ public final class AuctionDatabase {
     }
 
     private void createIndex(Statement st, String name, String target) {
-        // MySQL lacks CREATE INDEX IF NOT EXISTS on older versions; a duplicate is harmless.
+        // MySQL lacks CREATE INDEX IF NOT EXISTS on older versions, so fall back to a plain CREATE.
         try {
             st.executeUpdate("CREATE INDEX IF NOT EXISTS " + name + " ON " + target);
-        } catch (SQLException ignored) {
+        } catch (SQLException unsupported) {
             try {
                 st.executeUpdate("CREATE INDEX " + name + " ON " + target);
-            } catch (SQLException ignoredToo) {
-                // Index already exists.
+            } catch (SQLException e) {
+                // An index that already exists is the expected outcome here and is fine. Anything else
+                // (no permission to alter the schema, a typo in the target) leaves the query planner
+                // doing full scans forever, so say so rather than failing silently.
+                if (!alreadyExists(e)) {
+                    logger.warning("Could not create index " + name + " on " + target + " — queries using it"
+                            + " will fall back to a full table scan: " + e.getMessage());
+                }
             }
         }
+    }
+
+    /** True when the driver is telling us the index is already there (MySQL 1061 / SQLite message). */
+    private static boolean alreadyExists(SQLException e) {
+        if (e.getErrorCode() == 1061) {
+            return true;
+        }
+        String message = e.getMessage();
+        return message != null && message.toLowerCase(java.util.Locale.ROOT).contains("already exists");
     }
 
     // ------------------------------------------------------------------ listings
@@ -226,6 +248,108 @@ public final class AuctionDatabase {
             }
         }
         return out;
+    }
+
+    /**
+     * One page of active listings matching {@code query}, plus the total number of matches.
+     *
+     * <p>Filtering, sorting and paging all happen in SQL so a browse costs one page of rows rather than
+     * every active listing and its serialized item. The sort is mapped through a fixed whitelist — the
+     * ORDER BY clause is never built from caller input — and each ordering ends with the id so that
+     * listings sharing a price or timestamp keep a stable position between pages instead of shuffling
+     * and appearing twice (or not at all).
+     */
+    public ListingPage browse(ListingQuery query, int page, int perPage) throws SQLException {
+        List<Object> params = new ArrayList<>();
+        String where = buildWhere(query, params);
+
+        int total;
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT COUNT(*) FROM ra_listings " + where)) {
+            bindAll(ps, params);
+            try (ResultSet rs = ps.executeQuery()) {
+                total = rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+        if (total == 0) {
+            return ListingPage.empty();
+        }
+
+        int size = Math.max(1, perPage);
+        int offset = Math.max(0, page) * size;
+        List<Listing> rows = new ArrayList<>();
+        String sql = "SELECT * FROM ra_listings " + where + " ORDER BY " + orderBy(query.sort())
+                + " LIMIT ? OFFSET ?";
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            int index = bindAll(ps, params);
+            ps.setInt(index++, size);
+            ps.setInt(index, offset);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(mapListing(rs));
+                }
+            }
+        }
+        return new ListingPage(rows, total);
+    }
+
+    /** WHERE clause for a browse, collecting its bind values into {@code params} in order. */
+    private static String buildWhere(ListingQuery query, List<Object> params) {
+        StringBuilder where = new StringBuilder("WHERE status='ACTIVE'");
+        if (query.category() != null) {
+            // Compared case-insensitively because category ids come from config, where casing may
+            // differ from what was stamped on the listing when it was created.
+            where.append(" AND LOWER(category) = ?");
+            params.add(query.category().toLowerCase(Locale.ROOT));
+        }
+        if (query.tier() != null) {
+            where.append(" AND LOWER(tier) = ?");
+            params.add(query.tier().toLowerCase(Locale.ROOT));
+        }
+        if (query.type() != null) {
+            where.append(" AND type = ?");
+            params.add(query.type().name());
+        }
+        if (query.search() != null) {
+            where.append(" AND LOWER(display_name) LIKE ? ESCAPE '!'");
+            params.add("%" + escapeLike(query.search().toLowerCase(Locale.ROOT)) + "%");
+        }
+        return where.toString();
+    }
+
+    /**
+     * Neutralise LIKE wildcards typed into the search box, so searching for "50%" looks for that text
+     * rather than matching everything. '!' is the escape character because a backslash is not portable
+     * between MySQL and SQLite string literals.
+     */
+    private static String escapeLike(String input) {
+        StringBuilder out = new StringBuilder(input.length());
+        for (char ch : input.toCharArray()) {
+            if (ch == '!' || ch == '%' || ch == '_') {
+                out.append('!');
+            }
+            out.append(ch);
+        }
+        return out.toString();
+    }
+
+    /** Fixed mapping from sort option to SQL. Never interpolates anything caller-supplied. */
+    private static String orderBy(SortOrder sort) {
+        return switch (sort) {
+            case OLDEST -> "created_at ASC, id ASC";
+            case PRICE_LOW -> "price ASC, id ASC";
+            case PRICE_HIGH -> "price DESC, id ASC";
+            case NEWEST -> "created_at DESC, id ASC";
+        };
+    }
+
+    /** Bind the collected params starting at index 1; returns the next free index. */
+    private static int bindAll(PreparedStatement ps, List<Object> params) throws SQLException {
+        int index = 1;
+        for (Object param : params) {
+            ps.setObject(index++, param);
+        }
+        return index;
     }
 
     public List<Listing> activeListingsBySeller(UUID sellerId) throws SQLException {

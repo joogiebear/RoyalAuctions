@@ -92,11 +92,11 @@ public final class GuiManager {
     }
 
     public void openBrowse(Player player, String category, String search, SortOrder sort, int page) {
-        service.loadActiveListings(listings -> {
-            BrowseGui gui = new BrowseGui(this, player, category, search, sort);
-            gui.populate(listings, page);
-            player.openInventory(gui.getInventory());
-        });
+        // Open first, then fill: the page is fetched asynchronously, and the menu tracks whether it is
+        // still the open inventory before drawing into it.
+        BrowseGui gui = new BrowseGui(this, player, category, search, sort);
+        player.openInventory(gui.getInventory());
+        gui.populate(page);
     }
 
     public void openConfirm(Player player, Listing listing, String category, String search, SortOrder sort, int page) {

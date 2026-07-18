@@ -6,6 +6,8 @@ import com.mystipixel.royalauctions.data.AuctionDatabase;
 import com.mystipixel.royalauctions.data.CollectionItem;
 import com.mystipixel.royalauctions.data.ItemSerialization;
 import com.mystipixel.royalauctions.data.Listing;
+import com.mystipixel.royalauctions.data.ListingQuery;
+import com.mystipixel.royalauctions.data.ListingPage;
 import com.mystipixel.royalauctions.data.ListingStatus;
 import com.mystipixel.royalauctions.data.ListingType;
 import com.mystipixel.royalauctions.hooks.VaultHook;
@@ -394,6 +396,35 @@ public final class AuctionService {
     }
 
     // ------------------------------------------------------------------ loaders (async → main callback)
+
+    /**
+     * One page of browse results, fetched off the main thread. The stale-category repair runs over the
+     * rows on this page; a full sweep also happens at startup, so listings the player never scrolls to
+     * still get fixed.
+     */
+    public void loadBrowsePage(ListingQuery query, int page, int perPage, Consumer<ListingPage> callback) {
+        async(() -> {
+            try {
+                ListingPage result = db.browse(query, page, perPage);
+                repairStaleCategories(result.rows());
+                sync(() -> callback.accept(result));
+            } catch (Exception e) {
+                logError("loading listings", e);
+                sync(() -> callback.accept(ListingPage.empty()));
+            }
+        });
+    }
+
+    /** One-off pass over every active listing at startup, repairing categories renamed in config. */
+    public void repairCategoriesOnStartup() {
+        async(() -> {
+            try {
+                repairStaleCategories(db.activeListings());
+            } catch (Exception e) {
+                logError("repairing listing categories", e);
+            }
+        });
+    }
 
     public void loadActiveListings(Consumer<List<Listing>> callback) {
         async(() -> {

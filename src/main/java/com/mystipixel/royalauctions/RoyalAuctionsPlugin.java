@@ -115,6 +115,8 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
 
         scheduleExpiryTask();
         service.refreshActiveCount();
+        // The browse menu only repairs the categories it draws, so sweep everything once on startup.
+        service.repairCategoriesOnStartup();
 
         // The eco plugins register their items in a delayed task (their "Loaded X" lines land after
         // the server reports Done), so the audit has to wait for that or it would see an empty registry.
