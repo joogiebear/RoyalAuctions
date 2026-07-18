@@ -17,12 +17,19 @@ import net.milkbowl.vault.economy.Economy;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.ServiceRegisterEvent;
+import java.util.Locale;
+
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.logging.Level;
 
 public final class RoyalAuctionsPlugin extends JavaPlugin {
+
+    /** bStats project id. Identifies the plugin, not the server, so it is fixed rather than configurable. */
+    private static final int BSTATS_PLUGIN_ID = 32735;
 
     private PluginConfig config;
     private MessageManager messages;
@@ -129,6 +136,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
             getLogger().info("Registered PlaceholderAPI expansion.");
         }
 
+        setupMetrics();
         getLogger().info("RoyalAuctions enabled.");
     }
 
@@ -204,4 +212,20 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
     public PluginConfig pluginConfig() {
         return config;
     }
+    /**
+     * Anonymous usage reporting via bStats.
+     *
+     * <p>Server owners who want no reporting disable it globally in plugins/bStats/config.yml, which
+     * is the mechanism bStats provides; the id itself is fixed because it names this plugin's project.
+     */
+    private void setupMetrics() {
+        Metrics metrics = new Metrics(this, BSTATS_PLUGIN_ID);
+        metrics.addCustomChart(new SimplePie("storage_backend",
+                () -> getConfig().getString("storage.type", "SQLITE").toUpperCase(Locale.ROOT)));
+        metrics.addCustomChart(new SimplePie("confirm_purchase",
+                () -> String.valueOf(getConfig().getBoolean("settings.confirm-purchase", true))));
+        metrics.addCustomChart(new SimplePie("eco_items_hooked",
+                () -> String.valueOf(getServer().getPluginManager().isPluginEnabled("EcoItems"))));
+    }
+
 }
