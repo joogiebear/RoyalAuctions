@@ -4,6 +4,14 @@
 title: "&8Confirm Bid"
 rows: 3
 
+# Sounds this menu plays. enabled: false silences one without deleting it.
+sounds:
+  open:
+    enabled: true
+    name: UI_BUTTON_CLICK
+    volume: 0.7
+    pitch: 1.2
+
 mask:
   items:
     - black_stained_glass_pane

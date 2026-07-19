@@ -52,6 +52,29 @@ public final class MenuManager {
         return MenuTemplate.load(file, defaultTitle, defaultRows);
     }
 
+    /** A template by its menu id (the file name without .yml), or null if there is no such menu. */
+    public MenuTemplate get(String id) {
+        if (id == null) {
+            return null;
+        }
+        return switch (id.toLowerCase(java.util.Locale.ROOT)) {
+            case "hub" -> hub;
+            case "browse" -> browse;
+            case "bids" -> bids;
+            case "seller" -> seller;
+            case "create" -> create;
+            case "duration" -> duration;
+            case "confirm-purchase" -> confirmPurchase;
+            case "confirm-auction" -> confirmAuction;
+            case "confirm-bid" -> confirmBid;
+            case "confirm-cancel" -> confirmCancel;
+            case "bid" -> bid;
+            case "collection" -> collection;
+            case "manage" -> manage;
+            default -> null;
+        };
+    }
+
     public MenuTemplate hub() {
         return hub;
     }

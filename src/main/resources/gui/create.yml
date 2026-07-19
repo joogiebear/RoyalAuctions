@@ -78,5 +78,5 @@ sounds:
   open:
     enabled: true
     name: BLOCK_CHEST_OPEN
-    volume: 0.5
+    volume: 0.7
     pitch: 1.2

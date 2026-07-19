@@ -6,6 +6,7 @@ import com.mystipixel.royalauctions.data.Listing;
 import com.mystipixel.royalauctions.data.ListingType;
 import com.mystipixel.royalauctions.data.SortOrder;
 import com.mystipixel.royalauctions.gui.menu.MenuManager;
+import com.mystipixel.royalauctions.gui.menu.MenuTemplate;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
 import com.mystipixel.royalauctions.service.AuctionService;
@@ -61,6 +62,7 @@ public final class GuiManager {
             }
             HubGui gui = new HubGui(this, player, bids.size(), top, mine.size(), service.activeCache());
             player.openInventory(gui.getInventory());
+            playOpen(player, "hub");
         }));
     }
 
@@ -73,6 +75,7 @@ public final class GuiManager {
             BidsGui gui = new BidsGui(this, player, listings);
             gui.populate(page);
             player.openInventory(gui.getInventory());
+            playOpen(player, "bids");
         });
     }
 
@@ -82,6 +85,7 @@ public final class GuiManager {
             SellerGui gui = new SellerGui(this, player, sellerName, listings);
             gui.populate(0);
             player.openInventory(gui.getInventory());
+            playOpen(player, "seller");
         });
     }
 
@@ -96,6 +100,7 @@ public final class GuiManager {
         // still the open inventory before drawing into it.
         BrowseGui gui = new BrowseGui(this, player, category, search, sort);
         player.openInventory(gui.getInventory());
+        playOpen(player, "browse");
         gui.populate(page);
     }
 
@@ -106,6 +111,7 @@ public final class GuiManager {
         }
         ConfirmPurchaseGui gui = new ConfirmPurchaseGui(this, listing, category, search, sort, page);
         player.openInventory(gui.getInventory());
+        playOpen(player, "confirm-purchase");
     }
 
     /**
@@ -121,6 +127,7 @@ public final class GuiManager {
         }
         ConfirmBidGui gui = new ConfirmBidGui(this, player, listing, amount, category, search, sort, page);
         player.openInventory(gui.getInventory());
+        playOpen(player, "confirm-bid");
     }
 
     /** Gate a cancellation behind a confirmation. Falls through when confirmations.cancel is off. */
@@ -131,11 +138,13 @@ public final class GuiManager {
         }
         ConfirmCancelGui gui = new ConfirmCancelGui(this, player, listing, page);
         player.openInventory(gui.getInventory());
+        playOpen(player, "confirm-cancel");
     }
 
     public void openBid(Player player, Listing listing, String category, String search, SortOrder sort, int page) {
         BidGui gui = new BidGui(this, listing, category, search, sort, page);
         player.openInventory(gui.getInventory());
+        playOpen(player, "bid");
     }
 
     public void openCollection(Player player) {
@@ -147,6 +156,7 @@ public final class GuiManager {
             CollectionGui gui = new CollectionGui(this, player, items);
             gui.populate(page);
             player.openInventory(gui.getInventory());
+            playOpen(player, "collection");
         });
     }
 
@@ -178,6 +188,7 @@ public final class GuiManager {
     public void openDuration(Player player) {
         DurationGui gui = new DurationGui(this, player);
         player.openInventory(gui.getInventory());
+        playOpen(player, "duration");
     }
 
     public void setDuration(Player player, int hours) {
@@ -196,6 +207,7 @@ public final class GuiManager {
         }
         ConfirmAuctionGui gui = new ConfirmAuctionGui(this, player);
         player.openInventory(gui.getInventory());
+        playOpen(player, "confirm-auction");
     }
 
     public void confirmCreate(Player player) {
@@ -377,6 +389,19 @@ public final class GuiManager {
 
     public VaultHook vault() {
         return vault;
+    }
+
+    /**
+     * Play a menu's configured open sound.
+     *
+     * <p>MenuTemplate has always been able to do this, but nothing called it — so the sounds blocks in
+     * the menu files were decorative and no menu in this plugin ever made a noise.
+     */
+    private void playOpen(Player player, String menuId) {
+        MenuTemplate template = menus.get(menuId);
+        if (template != null) {
+            template.playSound(player, "open");
+        }
     }
 
     public MenuManager menus() {

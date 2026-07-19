@@ -111,5 +111,5 @@ sounds:
   open:
     enabled: true
     name: UI_BUTTON_CLICK
-    volume: 0.6
+    volume: 0.7
     pitch: 1.2
