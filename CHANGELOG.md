@@ -1,3 +1,15 @@
+## 2026.32.0 — 2026-08-07
+
+### ✨ Features
+- report anonymous usage stats via bStats (`e5d15cd`)
+
+### 🐛 Fixes
+- actually play menu sounds (`fe3d8d4`)
+- return escrowed create-flow items on shutdown instead of destroying them (`05b7532`)
+
+### ⚡ Performance
+- page auction browsing in SQL instead of in memory (`859bc62`)
+
 ## 2026.29.1 — 2026-07-17
 
 ### 🐛 Fixes
