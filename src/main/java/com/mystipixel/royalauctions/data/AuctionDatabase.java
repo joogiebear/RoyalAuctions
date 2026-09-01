@@ -156,6 +156,15 @@ public final class AuctionDatabase {
             createIndex(st, "idx_ra_collection_owner_created", "ra_collection(owner_id, created_at)");
             createIndex(st, "idx_ra_bids_bidder", "ra_bids(bidder_id)");
             createIndex(st, "idx_ra_bids_listing", "ra_bids(listing_id)");
+            // Events that happened to offline players, drained on their next join.
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS ra_events ("
+                    + "id " + autoIncrementPk() + ","
+                    + "player_id CHAR(36) NOT NULL,"
+                    + "type VARCHAR(16) NOT NULL,"
+                    + "item VARCHAR(256),"
+                    + "amount DOUBLE PRECISION NOT NULL,"
+                    + "created_at BIGINT NOT NULL)");
+            createIndex(st, "idx_ra_events_player", "ra_events(player_id)");
         }
     }
 
@@ -637,6 +646,45 @@ public final class AuctionDatabase {
                 while (rs.next()) {
                     out.add(mapListing(rs));
                 }
+            }
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------ offline events
+
+    /** Queue an event for a player who was not online to see it happen. */
+    public void addEvent(UUID player, String type, String item, double amount, long createdAt)
+            throws SQLException {
+        String sql = "INSERT INTO ra_events (player_id, type, item, amount, created_at) VALUES (?,?,?,?,?)";
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, player.toString());
+            ps.setString(2, type);
+            ps.setString(3, item);
+            ps.setDouble(4, amount);
+            ps.setLong(5, createdAt);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Read and delete a player's queued events, oldest first. The caller re-queues on failed delivery. */
+    public List<OfflineEvent> drainEvents(UUID player) throws SQLException {
+        List<OfflineEvent> out = new ArrayList<>();
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
+                "SELECT type, item, amount, created_at FROM ra_events WHERE player_id=? ORDER BY created_at ASC")) {
+            ps.setString(1, player.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new OfflineEvent(rs.getString("type"), rs.getString("item"),
+                            rs.getDouble("amount"), rs.getLong("created_at")));
+                }
+            }
+        }
+        if (!out.isEmpty()) {
+            try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
+                    "DELETE FROM ra_events WHERE player_id=?")) {
+                ps.setString(1, player.toString());
+                ps.executeUpdate();
             }
         }
         return out;

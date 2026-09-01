@@ -77,6 +77,25 @@ public final class AuctionService {
         plugin.getLogger().log(Level.SEVERE, "Database error while " + what, t);
     }
 
+    /**
+     * Queue an event for a player who was not online to watch it happen — sold, outbid, won,
+     * expired. Their next join replays the queue as a short summary (see OfflineEventNotifier),
+     * because money that moves silently while you're away reads as either a bug or a theft.
+     */
+    private void recordOffline(UUID player, String type, String item, double amount) {
+        if (player == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        async(() -> {
+            try {
+                db.addEvent(player, type, item, amount, now);
+            } catch (Exception e) {
+                logError("recording an offline event", e);
+            }
+        });
+    }
+
     // ------------------------------------------------------------------ listing (selling)
 
     /**
@@ -240,6 +259,9 @@ public final class AuctionService {
             if (prevOnline != null) {
                 messages.send(prevOnline, "bid.you-were-outbid",
                         "item", listing.displayName(), "amount", vault.format(outcome.previousBid));
+            } else {
+                recordOffline(outcome.previousBidderId, com.mystipixel.royalauctions.data.OfflineEvent.OUTBID,
+                        listing.displayName(), outcome.previousBid);
             }
         }
 
@@ -336,6 +358,9 @@ public final class AuctionService {
         if (onlineSeller != null) {
             messages.send(onlineSeller, "buy.sold-notify",
                     "buyer", buyer.getName(), "item", display, "price", vault.format(price));
+        } else {
+            recordOffline(listing.sellerId(), com.mystipixel.royalauctions.data.OfflineEvent.SOLD,
+                    display, price);
         }
         onDone.run();
     }
@@ -565,6 +590,10 @@ public final class AuctionService {
                     Player seller = Bukkit.getPlayer(sellerId);
                     if (seller != null) {
                         messages.send(seller, "expiry.expired-notify", "count", String.valueOf(count));
+                    } else {
+                        // amount carries the listing count for EXPIRED events, not money.
+                        recordOffline(sellerId, com.mystipixel.royalauctions.data.OfflineEvent.EXPIRED,
+                                null, count);
                     }
                 });
                 for (AuctionWin win : wins) {
@@ -579,11 +608,17 @@ public final class AuctionService {
                         messages.send(seller, "auction.sold-seller",
                                 "item", win.itemName(), "amount", vault.format(win.amount()),
                                 "buyer", win.winnerName() == null ? "someone" : win.winnerName());
+                    } else {
+                        recordOffline(win.sellerId(), com.mystipixel.royalauctions.data.OfflineEvent.SOLD,
+                                win.itemName(), win.amount());
                     }
                     Player winner = Bukkit.getPlayer(win.winnerId());
                     if (winner != null) {
                         messages.send(winner, "auction.won",
                                 "item", win.itemName(), "amount", vault.format(win.amount()));
+                    } else {
+                        recordOffline(win.winnerId(), com.mystipixel.royalauctions.data.OfflineEvent.WON,
+                                win.itemName(), win.amount());
                     }
                 }
             });

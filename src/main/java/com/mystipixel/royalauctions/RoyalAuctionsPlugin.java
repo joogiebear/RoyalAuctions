@@ -113,6 +113,8 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         this.guiManager = new GuiManager(this, service, config, categories, tiers, messages, vault, menus, signInput);
 
         getServer().getPluginManager().registerEvents(new AuctionGuiListener(guiManager), this);
+        getServer().getPluginManager().registerEvents(
+                new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault), this);
 
         AuctionCommand command = new AuctionCommand(this, guiManager, messages);
         if (getCommand("auctionhouse") != null) {

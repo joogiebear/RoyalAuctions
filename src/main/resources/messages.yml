@@ -62,10 +62,21 @@ bid:
   placed: "{prefix}&aBid of &f{amount} &aplaced on &f{item}&a."
   # Shown when a bid lands inside the anti-snipe window and pushes the end time back out.
   extended: "{prefix}&eAnti-snipe: the auction now ends in &f{seconds}s&e."
+
   outbid-already: "{prefix}&cSomeone already bid higher — try again."
   gone: "{prefix}&cThat auction is no longer available."
   you-were-outbid: "{prefix}&eYou were outbid on &f{item}&e. &f{amount} &erefunded."
   new-bid-seller: "{prefix}&a{bidder} &abid &f{amount} &aon your &f{item}&a."
+
+# The while-you-were-away summary, replayed shortly after join for events that
+# happened while the player was offline.
+away:
+  header: "{prefix}&6While you were away:"
+  sold: "{prefix} &a✔ Sold &f{item}&a for &f{amount}&a."
+  outbid: "{prefix} &c⇧ Outbid on &f{item}&c — your &f{amount}&c was refunded."
+  won: "{prefix} &6★ Won &f{item}&6 for &f{amount}&6 — claim it with &e/ah collect&6."
+  expired: "{prefix} &e{count} listing(s) expired &7— &f/ah collect&7."
+  more: "{prefix} &8…and {count} more."
 
 auction:
   won: "{prefix}&aYou won &f{item} &afor &f{amount}&a! Claim it in &f/ah collect&a."
