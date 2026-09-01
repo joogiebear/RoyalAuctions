@@ -43,6 +43,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
     private GuiManager guiManager;
 
     private BukkitTask expiryTask;
+    private BukkitTask pruneTask;
     private AuctionPlaceholderExpansion placeholderExpansion;
     private boolean fullyEnabled;
 
@@ -123,6 +124,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         }
 
         scheduleExpiryTask();
+        schedulePruneTask();
         service.refreshActiveCount();
         // The browse menu only repairs the categories it draws, so sweep everything once on startup.
         service.repairCategoriesOnStartup();
@@ -170,6 +172,9 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (expiryTask != null) {
             expiryTask.cancel();
         }
+        if (pruneTask != null) {
+            pruneTask.cancel();
+        }
         // Return anything still escrowed in a create-flow BEFORE the database closes. An item
         // deposited into the sell menu lives only in memory until the listing is confirmed, so a
         // restart at that moment would destroy it outright.
@@ -196,6 +201,30 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
                 .runTaskTimerAsynchronously(this, () -> service.sweepExpired(), interval, interval);
     }
 
+    /** Daily audit-tail prune (first pass 5 minutes after start). Config 0 keeps everything forever. */
+    private void schedulePruneTask() {
+        if (pruneTask != null) {
+            pruneTask.cancel();
+            pruneTask = null;
+        }
+        if (config.closedRetentionDays() <= 0) {
+            return;
+        }
+        this.pruneTask = getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+            long cutoff = System.currentTimeMillis()
+                    - config.closedRetentionDays() * 24L * 60L * 60L * 1000L;
+            try {
+                int removed = database.pruneClosed(cutoff);
+                if (removed > 0) {
+                    getLogger().info("Pruned " + removed + " closed listing(s) older than "
+                            + config.closedRetentionDays() + " days (and their bid history).");
+                }
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "Retention prune failed", e);
+            }
+        }, 20L * 300L, 20L * 60L * 60L * 24L);
+    }
+
     /** Reload config, messages and categories. Storage-backend changes still need a restart. */
     public void reloadEverything() {
         config.reload();
@@ -208,6 +237,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         this.tiers.load(config.tiersSection());
         menus.reload();
         scheduleExpiryTask();
+        schedulePruneTask();
         categories.auditCustomItems();
     }
 

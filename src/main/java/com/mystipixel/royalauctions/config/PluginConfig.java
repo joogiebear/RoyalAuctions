@@ -59,6 +59,7 @@ public final class PluginConfig {
 
     private SortOrder defaultSort;
     private long expirySweepTicks;
+    private int closedRetentionDays;
 
     public PluginConfig(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -106,6 +107,7 @@ public final class PluginConfig {
 
         this.defaultSort = SortOrder.fromString(c.getString("default-sort"), SortOrder.NEWEST);
         this.expirySweepTicks = Math.max(1, c.getLong("expiry-sweep-minutes", 5)) * 60L * 20L;
+        this.closedRetentionDays = Math.max(0, c.getInt("closed-retention-days", 90));
     }
 
     private void loadDurations(ConfigurationSection listings) {
@@ -380,5 +382,10 @@ public final class PluginConfig {
 
     public long expirySweepTicks() {
         return expirySweepTicks;
+    }
+
+    /** Days closed listings and their bid history are kept before pruning; 0 = keep forever. */
+    public int closedRetentionDays() {
+        return closedRetentionDays;
     }
 }

@@ -238,3 +238,8 @@ default-sort: NEWEST
 # How often (in minutes) the plugin sweeps for expired listings.
 expiry-sweep-minutes: 5
 
+# How long closed listings (sold / expired / cancelled) and their bid history are
+# kept, in days. They are the audit trail for disputes, so the default keeps a
+# generous window - but without a bound the tables only ever grow. 0 = keep forever.
+closed-retention-days: 90
+

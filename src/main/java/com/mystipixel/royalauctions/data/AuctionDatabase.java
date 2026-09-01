@@ -651,6 +651,37 @@ public final class AuctionDatabase {
         return out;
     }
 
+    // ------------------------------------------------------------------ retention
+
+    /**
+     * Prune the audit tail: closed listings older than {@code cutoff}, the bids of listings that no
+     * longer exist, and undelivered offline events for players who never came back. Returns how many
+     * listings went.
+     *
+     * <p>{@code COALESCE(sold_at, expires_at)} approximates the closure time: SOLD rows stamp
+     * {@code sold_at}, while EXPIRED/CANCELLED rows have no closure stamp of their own — but their
+     * {@code expires_at} is at most one listing-duration away from it, which is close enough for a
+     * retention window measured in days.
+     */
+    public int pruneClosed(long cutoff) throws SQLException {
+        int removed;
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
+                "DELETE FROM ra_listings WHERE status<>'ACTIVE' AND COALESCE(sold_at, expires_at) < ?")) {
+            ps.setLong(1, cutoff);
+            removed = ps.executeUpdate();
+        }
+        try (Connection c = dataSource.getConnection(); Statement st = c.createStatement()) {
+            st.executeUpdate("DELETE FROM ra_bids WHERE NOT EXISTS "
+                    + "(SELECT 1 FROM ra_listings l WHERE l.id = ra_bids.listing_id)");
+        }
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
+                "DELETE FROM ra_events WHERE created_at < ?")) {
+            ps.setLong(1, cutoff);
+            ps.executeUpdate();
+        }
+        return removed;
+    }
+
     // ------------------------------------------------------------------ offline events
 
     /** Queue an event for a player who was not online to see it happen. */
