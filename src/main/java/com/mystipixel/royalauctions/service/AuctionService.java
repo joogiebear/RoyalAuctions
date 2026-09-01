@@ -534,7 +534,11 @@ public final class AuctionService {
             try {
                 if (listing.type() == ListingType.AUCTION && listing.hasBids()) {
                     // Auction with a winner: hand the item to the top bidder, pay the seller the bid.
-                    if (db.markSoldIfActive(listing.id(), listing.topBidderId(), now)) {
+                    // Conditional on the bid count this sweep read: a bid committing between the read
+                    // and this flip would otherwise be charged while the stale leader got the item
+                    // and the payout. On a miss the next sweep finalises from the fresh row.
+                    if (db.markAuctionSoldIfUnchanged(listing.id(), listing.topBidderId(), now,
+                            listing.bidCount())) {
                         db.addCollectionItem(new CollectionItem(UUID.randomUUID(), listing.topBidderId(),
                                 listing.itemData(), CollectionItem.Reason.PURCHASE, now));
                         wins.add(new AuctionWin(listing.sellerId(), listing.currentBid(),

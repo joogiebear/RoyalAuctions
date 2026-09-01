@@ -435,6 +435,25 @@ public final class AuctionDatabase {
         }
     }
 
+    /**
+     * Atomically finalise a won auction, but only if the bid state the sweep read is still current —
+     * {@code bid_count} acts as the optimistic lock, exactly as in {@link #placeBid}. A false return
+     * means a bid landed between the sweep's read and this flip; the sweep skips the listing and the
+     * next pass finalises it from the fresh row, so the newer bidder is never silently overpaid past.
+     */
+    public boolean markAuctionSoldIfUnchanged(UUID id, UUID buyerId, long soldAt, int expectedBidCount)
+            throws SQLException {
+        String sql = "UPDATE ra_listings SET status='SOLD', buyer_id=?, sold_at=? "
+                + "WHERE id=? AND status='ACTIVE' AND bid_count=?";
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, buyerId.toString());
+            ps.setLong(2, soldAt);
+            ps.setString(3, id.toString());
+            ps.setInt(4, expectedBidCount);
+            return ps.executeUpdate() == 1;
+        }
+    }
+
     /** Undo a SOLD flip if the buyer's payment failed after we reserved the listing. */
     public boolean revertSold(UUID id, UUID buyerId) throws SQLException {
         String sql = "UPDATE ra_listings SET status='ACTIVE', buyer_id=NULL, sold_at=NULL "
@@ -485,7 +504,7 @@ public final class AuctionDatabase {
                 double prevBid = 0;
                 int seenCount;
                 try (PreparedStatement sel = c.prepareStatement(
-                        "SELECT status, current_bid, top_bidder_id, top_bidder_name, bid_count "
+                        "SELECT status, current_bid, top_bidder_id, top_bidder_name, bid_count, expires_at "
                         + "FROM ra_listings WHERE id=?")) {
                     sel.setString(1, id.toString());
                     try (ResultSet rs = sel.executeQuery()) {
@@ -494,6 +513,13 @@ public final class AuctionDatabase {
                             return BidOutcome.fail("GONE");
                         }
                         if (!"ACTIVE".equals(rs.getString("status"))) {
+                            c.rollback();
+                            return BidOutcome.fail("GONE");
+                        }
+                        // A row can sit expired-but-ACTIVE until the sweep reaches it. A bid accepted
+                        // in that window races the sweep's finalisation — the sweep pays out the state
+                        // it already read, and this bidder would be charged for nothing.
+                        if (rs.getLong("expires_at") <= System.currentTimeMillis()) {
                             c.rollback();
                             return BidOutcome.fail("GONE");
                         }
