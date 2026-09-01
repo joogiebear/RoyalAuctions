@@ -32,6 +32,7 @@ public final class PluginConfig {
     private final JavaPlugin plugin;
 
     private int maxPerPlayer;
+    private List<String> sellableCategories;
     private double minPrice;
     private double maxPrice;
     private double feePercent;
@@ -69,6 +70,12 @@ public final class PluginConfig {
 
         ConfigurationSection listings = section(c, "listings");
         this.maxPerPlayer = listings.getInt("max-per-player", 7);
+        // Which categories may be listed at all. Empty = no restriction, which is the shipped
+        // default: a fresh install should not silently refuse half the items in the game.
+        this.sellableCategories = listings.getStringList("sellable-categories").stream()
+                .map(x -> x.toLowerCase(Locale.ROOT).trim())
+                .filter(x -> !x.isEmpty())
+                .toList();
         this.minPrice = listings.getDouble("min-price", 1.0);
         this.maxPrice = listings.getDouble("max-price", -1);
         this.instantDeliver = listings.getBoolean("instant-deliver-purchases", true);
@@ -274,6 +281,26 @@ public final class PluginConfig {
     /** Minimum raise over the current bid: the larger of the flat and percentage increments. */
     public double bidIncrementFor(double currentBid) {
         return Math.max(bidMinIncrement, currentBid * bidIncrementPercent);
+    }
+
+    /**
+     * Categories a player may list into, lower-cased. Empty means everything is listable.
+     *
+     * <p>Expressed as categories rather than as its own material list so there is one place that
+     * decides what an item *is* — the browse category and the sell rule can never disagree, and a
+     * new custom item is classified once.
+     */
+    public List<String> sellableCategories() {
+        return sellableCategories;
+    }
+
+    public boolean restrictsSelling() {
+        return !sellableCategories.isEmpty();
+    }
+
+    public boolean canSellCategory(String categoryId) {
+        return sellableCategories.isEmpty()
+                || sellableCategories.contains(categoryId.toLowerCase(Locale.ROOT));
     }
 
     public int maxPerPlayer() {

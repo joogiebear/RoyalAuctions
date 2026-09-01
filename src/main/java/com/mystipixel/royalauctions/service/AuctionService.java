@@ -91,6 +91,16 @@ public final class AuctionService {
             onResult.accept(false);
             return;
         }
+        // Refuse the listing before anything is charged or withdrawn. The check reuses the browse
+        // categoriser rather than carrying its own material list, so what an item *is* is decided in
+        // exactly one place — the category a buyer browses under and the rule that let it be sold
+        // can never drift apart.
+        String sellCategory = categories.categorize(item);
+        if (!config.canSellCategory(sellCategory)) {
+            messages.send(seller, "sell.category-not-allowed", "category", sellCategory);
+            onResult.accept(false);
+            return;
+        }
         if (price < config.minPrice()) {
             messages.send(seller, "sell.min-price", "min", vault.format(config.minPrice()));
             onResult.accept(false);

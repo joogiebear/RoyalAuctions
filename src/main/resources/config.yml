@@ -55,6 +55,18 @@ listings:
   max-per-player: 7
   # Price bounds (in Vault currency). max-price: -1 disables the upper bound.
   min-price: 1.0
+
+  # Which categories may be LISTED. Empty = anything can be sold, which is the
+  # default so a fresh install does not silently refuse half the game.
+  #
+  # Naming categories rather than materials means there is one place that decides
+  # what an item is: the bucket a buyer browses under is the same bucket the sell
+  # rule reads, so they cannot drift apart, and a new custom item is classified
+  # once rather than in two lists that slowly disagree.
+  #
+  # Anything left out is refused with the category-not-allowed message, which
+  # should say where the item DOES belong.
+  sellable-categories: []
   max-price: -1
   # Listing fee charged to the seller when posting.
   #   percent: fraction of the sale price (0.02 = 2%)
