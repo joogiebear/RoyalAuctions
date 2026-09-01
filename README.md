@@ -32,7 +32,7 @@ Part of a suite with [RoyalBank](https://github.com/joogiebear/RoyalBank),
 
 | | |
 |---|---|
-| **Server** | Paper 1.21+ (tested on Paper 26.2 / Java 25) |
+| **Server** | Paper 26.2 or newer (Java 25) |
 | **Required** | Vault **and an economy provider** (EssentialsX, CMI, an EcoBits currency with `vault: true`, …) |
 | **Optional** | eco suite, PlaceholderAPI, EconGuard, Citizens |
 
