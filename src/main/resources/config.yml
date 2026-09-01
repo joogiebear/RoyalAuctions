@@ -223,7 +223,8 @@ tiers:
 
 
 # ---------------------------------------------------------------------
-# Sorting for the browse screen. Options: NEWEST, OLDEST, PRICE_LOW, PRICE_HIGH
+# Sorting for the browse screen.
+# Options: NEWEST, OLDEST, PRICE_LOW, PRICE_HIGH, ENDING_SOON
 # ---------------------------------------------------------------------
 default-sort: NEWEST
 

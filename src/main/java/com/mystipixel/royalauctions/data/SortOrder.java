@@ -6,7 +6,9 @@ public enum SortOrder {
     NEWEST(Comparator.comparingLong(Listing::createdAt).reversed()),
     OLDEST(Comparator.comparingLong(Listing::createdAt)),
     PRICE_LOW(Comparator.comparingDouble(Listing::price)),
-    PRICE_HIGH(Comparator.comparingDouble(Listing::price).reversed());
+    PRICE_HIGH(Comparator.comparingDouble(Listing::price).reversed()),
+    /** Soonest to expire first — the sort that makes hunting for auctions to bid into possible. */
+    ENDING_SOON(Comparator.comparingLong(Listing::expiresAt));
 
     private final Comparator<Listing> comparator;
 

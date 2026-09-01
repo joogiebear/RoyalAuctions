@@ -292,6 +292,7 @@ public final class BrowseGui extends AuctionGui {
             case OLDEST -> "Oldest";
             case PRICE_LOW -> "Price ↑";
             case PRICE_HIGH -> "Price ↓";
+            case ENDING_SOON -> "Ending Soon";
         };
     }
 

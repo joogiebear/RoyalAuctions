@@ -339,6 +339,7 @@ public final class AuctionDatabase {
             case OLDEST -> "created_at ASC, id ASC";
             case PRICE_LOW -> "price ASC, id ASC";
             case PRICE_HIGH -> "price DESC, id ASC";
+            case ENDING_SOON -> "expires_at ASC, id ASC";
             case NEWEST -> "created_at DESC, id ASC";
         };
     }
