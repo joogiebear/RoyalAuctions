@@ -1,7 +1,7 @@
 name: RoyalAuctions
 version: ${version}
 main: com.mystipixel.royalauctions.RoyalAuctionsPlugin
-api-version: '1.21'
+api-version: '26.2'
 author: Mystipixel
 description: Hypixel-style Auction House with full eco-suite item compatibility.
 depend:
