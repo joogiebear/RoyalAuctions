@@ -45,6 +45,7 @@ public final class PluginConfig {
 
     private double bidMinIncrement;
     private double bidIncrementPercent;
+    private long antiSnipeSeconds;
 
     private String browseTitle;
     private String collectionTitle;
@@ -90,6 +91,7 @@ public final class PluginConfig {
         ConfigurationSection bidding = section(c, "bidding");
         this.bidMinIncrement = bidding.getDouble("min-increment", 10.0);
         this.bidIncrementPercent = bidding.getDouble("increment-percent", 0.05);
+        this.antiSnipeSeconds = Math.max(0, bidding.getLong("anti-snipe-seconds", 60));
 
         ConfigurationSection gui = section(c, "gui");
         this.browseTitle = gui.getString("browse-title", "&8Auction House");
@@ -281,6 +283,11 @@ public final class PluginConfig {
     /** Minimum raise over the current bid: the larger of the flat and percentage increments. */
     public double bidIncrementFor(double currentBid) {
         return Math.max(bidMinIncrement, currentBid * bidIncrementPercent);
+    }
+
+    /** How close to expiry a bid must land to push the end time back out; 0 = anti-snipe off. */
+    public long antiSnipeMillis() {
+        return antiSnipeSeconds * 1000L;
     }
 
     /**

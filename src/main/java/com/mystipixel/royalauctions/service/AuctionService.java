@@ -194,7 +194,7 @@ public final class AuctionService {
         async(() -> {
             com.mystipixel.royalauctions.data.AuctionDatabase.BidOutcome outcome;
             try {
-                outcome = db.placeBid(listing.id(), bidderId, bidderName, amount);
+                outcome = db.placeBid(listing.id(), bidderId, bidderName, amount, config.antiSnipeMillis());
             } catch (Exception e) {
                 logError("placing bid", e);
                 sync(onDone);
@@ -249,6 +249,10 @@ public final class AuctionService {
                     "item", listing.displayName(), "amount", vault.format(amount), "bidder", bidder.getName());
         }
         messages.send(bidder, "bid.placed", "item", listing.displayName(), "amount", vault.format(amount));
+        if (outcome.extended) {
+            long seconds = Math.max(1, (outcome.expiresAt - System.currentTimeMillis()) / 1000L);
+            messages.send(bidder, "bid.extended", "seconds", String.valueOf(seconds));
+        }
         onDone.run();
     }
 

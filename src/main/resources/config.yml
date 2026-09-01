@@ -91,6 +91,13 @@ bidding:
   # When someone is outbid their money is refunded automatically. When an
   # auction ends the highest bidder wins and the seller is paid the winning bid.
 
+  # Anti-snipe: a bid landing in the final N seconds pushes the end time back
+  # out to N seconds away, so a last-second bid can always be answered instead
+  # of silently winning. Extensions repeat as long as bids keep coming, which
+  # is the point - the auction ends when bidders stop, not when a timer says.
+  # 0 disables the extension entirely.
+  anti-snipe-seconds: 60
+
 # ---------------------------------------------------------------------
 # GUI / Menus
 #

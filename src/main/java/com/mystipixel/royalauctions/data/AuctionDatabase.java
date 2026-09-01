@@ -473,30 +473,41 @@ public final class AuctionDatabase {
         public final String previousBidderName;
         public final double previousBid;
         public final String failureReason;  // "GONE" or "OUTBID" when success is false
+        /** True when this bid landed inside the anti-snipe window and pushed the end time back. */
+        public final boolean extended;
+        /** The listing's end time after this bid (extended or not); 0 on failure. */
+        public final long expiresAt;
 
         private BidOutcome(boolean success, UUID previousBidderId, String previousBidderName,
-                           double previousBid, String failureReason) {
+                           double previousBid, String failureReason, boolean extended, long expiresAt) {
             this.success = success;
             this.previousBidderId = previousBidderId;
             this.previousBidderName = previousBidderName;
             this.previousBid = previousBid;
             this.failureReason = failureReason;
+            this.extended = extended;
+            this.expiresAt = expiresAt;
         }
 
-        static BidOutcome ok(UUID prevBidder, String prevName, double prevBid) {
-            return new BidOutcome(true, prevBidder, prevName, prevBid, null);
+        static BidOutcome ok(UUID prevBidder, String prevName, double prevBid, boolean extended, long expiresAt) {
+            return new BidOutcome(true, prevBidder, prevName, prevBid, null, extended, expiresAt);
         }
 
         static BidOutcome fail(String reason) {
-            return new BidOutcome(false, null, null, 0, reason);
+            return new BidOutcome(false, null, null, 0, reason, false, 0L);
         }
     }
 
     /**
      * Place a bid inside a transaction, using the row's {@code bid_count} as an optimistic lock so
      * two concurrent bids can't both win. Returns who previously led (to refund them) on success.
+     *
+     * <p>{@code antiSnipeMillis > 0} enables the anti-snipe extension: a bid landing inside that
+     * window before expiry pushes {@code expires_at} back out to a full window away, in the same
+     * transaction as the bid itself, so a last-second bid can always be answered.
      */
-    public BidOutcome placeBid(UUID id, UUID bidderId, String bidderName, double amount) throws SQLException {
+    public BidOutcome placeBid(UUID id, UUID bidderId, String bidderName, double amount,
+                               long antiSnipeMillis) throws SQLException {
         try (Connection c = dataSource.getConnection()) {
             c.setAutoCommit(false);
             try {
@@ -504,6 +515,7 @@ public final class AuctionDatabase {
                 String prevBidderName = null;
                 double prevBid = 0;
                 int seenCount;
+                long expiresAt;
                 try (PreparedStatement sel = c.prepareStatement(
                         "SELECT status, current_bid, top_bidder_id, top_bidder_name, bid_count, expires_at "
                         + "FROM ra_listings WHERE id=?")) {
@@ -520,7 +532,8 @@ public final class AuctionDatabase {
                         // A row can sit expired-but-ACTIVE until the sweep reaches it. A bid accepted
                         // in that window races the sweep's finalisation — the sweep pays out the state
                         // it already read, and this bidder would be charged for nothing.
-                        if (rs.getLong("expires_at") <= System.currentTimeMillis()) {
+                        expiresAt = rs.getLong("expires_at");
+                        if (expiresAt <= System.currentTimeMillis()) {
                             c.rollback();
                             return BidOutcome.fail("GONE");
                         }
@@ -538,14 +551,20 @@ public final class AuctionDatabase {
                         }
                     }
                 }
+                // Anti-snipe: a bid inside the window pushes the end back out to a full window away.
+                long now = System.currentTimeMillis();
+                boolean extended = antiSnipeMillis > 0 && expiresAt - now < antiSnipeMillis;
+                long newExpiresAt = extended ? now + antiSnipeMillis : expiresAt;
+
                 try (PreparedStatement upd = c.prepareStatement(
                         "UPDATE ra_listings SET current_bid=?, top_bidder_id=?, top_bidder_name=?, "
-                        + "bid_count=bid_count+1 WHERE id=? AND status='ACTIVE' AND bid_count=?")) {
+                        + "bid_count=bid_count+1, expires_at=? WHERE id=? AND status='ACTIVE' AND bid_count=?")) {
                     upd.setDouble(1, amount);
                     upd.setString(2, bidderId.toString());
                     upd.setString(3, bidderName);
-                    upd.setString(4, id.toString());
-                    upd.setInt(5, seenCount);
+                    upd.setLong(4, newExpiresAt);
+                    upd.setString(5, id.toString());
+                    upd.setInt(6, seenCount);
                     if (upd.executeUpdate() != 1) {
                         c.rollback();
                         return BidOutcome.fail("OUTBID"); // lost the optimistic race
@@ -564,7 +583,7 @@ public final class AuctionDatabase {
                     ins.executeUpdate();
                 }
                 c.commit();
-                return BidOutcome.ok(prevBidder, prevBidderName, prevBid);
+                return BidOutcome.ok(prevBidder, prevBidderName, prevBid, extended, newExpiresAt);
             } catch (SQLException e) {
                 c.rollback();
                 throw e;
