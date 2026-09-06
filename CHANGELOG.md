@@ -1,3 +1,18 @@
+## 2026.36.0 — 2026-09-06
+
+### ✨ Features
+- bounded retention for the audit tail (`b8b3ffa`)
+- while-you-were-away summary on join (`81d238b`)
+- anti-snipe bid extension (`fe3fd49`)
+- ENDING_SOON browse sort (`fc77ff9`)
+- optional sellable-categories restriction on listings (`89d8903`)
+
+### 🐛 Fixes
+- close the last-second-bid race in the expiry sweep (`b773288`)
+
+### 📝 Documentation
+- state the Paper 26.2-or-newer requirement (`271097f`)
+
 ## 2026.32.0 — 2026-08-07
 
 ### ✨ Features
