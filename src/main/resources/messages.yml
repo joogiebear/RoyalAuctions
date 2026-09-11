@@ -81,3 +81,5 @@ away:
 auction:
   won: "{prefix}&aYou won &f{item} &afor &f{amount}&a! Claim it in &f/ah collect&a."
   sold-seller: "{prefix}&aYour auction for &f{item} &asold to &f{buyer} &afor &f{amount}&a."
+
+payment-pending: "&eAn auction payment is on hold. Staff can check its status; do not repeat the transaction."

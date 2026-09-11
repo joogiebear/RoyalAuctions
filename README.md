@@ -380,3 +380,7 @@ Java 21, Maven. `eco` is a `provided` dependency resolved from the Auxilor repo.
   when it enables. Vault being a hard dependency says nothing about the *economy plugin*, which is
   separate and can register later; disabling would mean the plugin silently kills itself purely
   because of plugin load order.
+
+## Payment recovery
+
+Rejected payouts and refunds are retained for retry; unknown payment outcomes are held for staff reconciliation. See [payment recovery and upgrade notes](docs/payment-recovery.md).

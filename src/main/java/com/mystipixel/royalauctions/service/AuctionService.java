@@ -14,7 +14,6 @@ import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
 import com.mystipixel.royalauctions.util.Text;
 import org.bukkit.Bukkit;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -34,6 +33,7 @@ import java.util.logging.Level;
  */
 public final class AuctionService {
 
+    private final PendingPayments payments;
     private final JavaPlugin plugin;
     private final AuctionDatabase db;
     private final VaultHook vault;
@@ -49,6 +49,16 @@ public final class AuctionService {
     public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
                           CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
                           MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard) {
+        this(plugin, db, vault, config, categories, tiers, messages, econGuard,
+                new PendingPayments(new com.mystipixel.royalauctions.data.PaymentJournal(
+                        plugin.getDataFolder().toPath().resolve("payments")), vault, econGuard, plugin.getLogger()));
+    }
+
+    public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
+                          CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
+                          MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard,
+                          PendingPayments payments) {
+        this.payments = payments;
         this.plugin = plugin;
         this.db = db;
         this.vault = vault;
@@ -57,6 +67,17 @@ public final class AuctionService {
         this.tiers = tiers;
         this.messages = messages;
         this.econGuard = econGuard;
+    }
+
+    public void retryPayments() { payments.retryRejected(); }
+
+    private boolean credit(String source, UUID recipient, double amount, String action, UUID counterparty, String itemName) {
+        boolean paid = payments.credit(PendingPayments.key(action, source), recipient, amount, action, counterparty, source, itemName);
+        if (!paid) {
+            Player online = Bukkit.getPlayer(recipient);
+            if (online != null) messages.send(online, "payment-pending");
+        }
+        return paid;
     }
 
     // ------------------------------------------------------------------ scheduling helpers
@@ -181,7 +202,7 @@ public final class AuctionService {
             } catch (Exception e) {
                 logError("inserting listing", e);
                 sync(() -> {
-                    vault.deposit(seller, fee); // refund the fee we took
+                    credit(listing.id().toString(), seller.getUniqueId(), fee, "listing-fee-refund", null, listing.displayName());
                     onResult.accept(false);
                 });
             }
@@ -251,15 +272,14 @@ public final class AuctionService {
 
         // Refund whoever we just outbid.
         if (outcome.previousBidderId != null) {
-            OfflinePlayer prev = Bukkit.getOfflinePlayer(outcome.previousBidderId);
-            vault.deposit(prev, outcome.previousBid);
-            econGuard.report(outcome.previousBidderId, outcome.previousBidderName, "bid-refund",
-                    outcome.previousBid, true, null, null, listing.displayName());
+            boolean refunded = credit(listing.id() + ":" + outcome.previousBidderId + ":"
+                    + Double.toHexString(outcome.previousBid), outcome.previousBidderId,
+                    outcome.previousBid, "bid-refund", null, listing.displayName());
             Player prevOnline = Bukkit.getPlayer(outcome.previousBidderId);
-            if (prevOnline != null) {
+            if (refunded && prevOnline != null) {
                 messages.send(prevOnline, "bid.you-were-outbid",
                         "item", listing.displayName(), "amount", vault.format(outcome.previousBid));
-            } else {
+            } else if (refunded) {
                 recordOffline(outcome.previousBidderId, com.mystipixel.royalauctions.data.OfflineEvent.OUTBID,
                         listing.displayName(), outcome.previousBid);
             }
@@ -327,14 +347,11 @@ public final class AuctionService {
             return;
         }
 
-        OfflinePlayer seller = Bukkit.getOfflinePlayer(listing.sellerId());
-        vault.deposit(seller, price);
+        boolean sellerPaid = credit(listing.id().toString(), listing.sellerId(), price, "sale", buyer.getUniqueId(), listing.displayName());
 
         // Both legs of the sale to EconGuard, each naming the other party for RMT / collusion analysis.
         econGuard.report(buyer.getUniqueId(), buyer.getName(), "buy", price, false,
                 listing.sellerId(), listing.sellerName(), listing.displayName());
-        econGuard.report(listing.sellerId(), listing.sellerName(), "sale", price, true,
-                buyer.getUniqueId(), buyer.getName(), listing.displayName());
 
         ItemStack item = listing.item();
         String display = listing.displayName();
@@ -355,10 +372,10 @@ public final class AuctionService {
         }
 
         Player onlineSeller = Bukkit.getPlayer(listing.sellerId());
-        if (onlineSeller != null) {
+        if (sellerPaid && onlineSeller != null) {
             messages.send(onlineSeller, "buy.sold-notify",
                     "buyer", buyer.getName(), "item", display, "price", vault.format(price));
-        } else {
+        } else if (sellerPaid) {
             recordOffline(listing.sellerId(), com.mystipixel.royalauctions.data.OfflineEvent.SOLD,
                     display, price);
         }
@@ -544,7 +561,7 @@ public final class AuctionService {
     // ------------------------------------------------------------------ expiry sweep
 
     /** A finished auction that needs the seller paid and the winner notified (done on the main thread). */
-    private record AuctionWin(UUID sellerId, double amount, UUID winnerId, String winnerName, String itemName) {
+    private record AuctionWin(UUID listingId, UUID sellerId, double amount, UUID winnerId, String winnerName, String itemName) {
     }
 
     public void sweepExpired() {
@@ -570,7 +587,7 @@ public final class AuctionService {
                             listing.bidCount())) {
                         db.addCollectionItem(new CollectionItem(UUID.randomUUID(), listing.topBidderId(),
                                 listing.itemData(), CollectionItem.Reason.PURCHASE, now));
-                        wins.add(new AuctionWin(listing.sellerId(), listing.currentBid(),
+                        wins.add(new AuctionWin(listing.id(), listing.sellerId(), listing.currentBid(),
                                 listing.topBidderId(), listing.topBidderName(), listing.displayName()));
                     }
                 } else if (db.markExpiredIfActive(listing.id())) {
@@ -597,18 +614,16 @@ public final class AuctionService {
                     }
                 });
                 for (AuctionWin win : wins) {
-                    OfflinePlayer winSeller = Bukkit.getOfflinePlayer(win.sellerId());
-                    vault.deposit(winSeller, win.amount());
+                    boolean sellerPaid = credit(win.listingId().toString(), win.sellerId(), win.amount(),
+                            "auction-sale", win.winnerId(), win.itemName());
                     // The winner's outflow was already reported when they bid; log the seller's payout,
                     // naming the winner as counterparty so EconGuard can link the pair.
-                    econGuard.report(win.sellerId(), winSeller.getName(), "auction-sale", win.amount(), true,
-                            win.winnerId(), win.winnerName(), win.itemName());
                     Player seller = Bukkit.getPlayer(win.sellerId());
-                    if (seller != null) {
+                    if (sellerPaid && seller != null) {
                         messages.send(seller, "auction.sold-seller",
                                 "item", win.itemName(), "amount", vault.format(win.amount()),
                                 "buyer", win.winnerName() == null ? "someone" : win.winnerName());
-                    } else {
+                    } else if (sellerPaid) {
                         recordOffline(win.sellerId(), com.mystipixel.royalauctions.data.OfflineEvent.SOLD,
                                 win.itemName(), win.amount());
                     }

@@ -15,8 +15,8 @@ import java.util.Map;
 
 /**
  * View Bids — every still-active auction the player has bid on, marked TOP BIDDER or OUTBID.
- * Layout from gui/bids.yml. Being outbid means you were already refunded, so "Outbid" is
- * informational (nothing at stake) — click to re-bid.
+ * Layout from gui/bids.yml. Outbid refunds normally settle immediately; rejected credits remain
+ * in the payment journal for retry. The OUTBID label is not proof that a refund was paid.
  */
 public final class BidsGui extends AuctionGui {
 

@@ -107,7 +107,15 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (econGuard.isPresent()) {
             getLogger().info("EconGuard detected - auction money movements will be reported to the central audit core.");
         }
-        this.service = new AuctionService(this, database, vault, config, categories, tiers, messages, econGuard);
+        try {
+            this.service = new AuctionService(this, database, vault, config, categories, tiers, messages, econGuard);
+        } catch (RuntimeException e) {
+            getLogger().log(Level.SEVERE, "Cannot load payment records safely; disabling RoyalAuctions", e);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+        // Bukkit cancels this main-thread task on disable. No async Vault calls.
+        getServer().getScheduler().runTaskTimer(this, service::retryPayments, 600L, 600L);
         this.menus = new MenuManager(this);
         SignInput signInput = new SignInput(this);
         getServer().getPluginManager().registerEvents(signInput, this);
