@@ -92,6 +92,13 @@ the reserved draft. Do not delete operation or lock rows to unblock an exchange.
 
 ## Upgrade and rollback
 
+File receipts from the earlier payment-recovery update remain supported in `payments/pending`
+and `payments/receipts`. Keep these folders on their originating server. The compatibility worker
+retries explicitly rejected old credits every 30 seconds, up to ten per pass, and leaves unknown
+outcomes held. It does not create a second database obligation for those receipts. New exchanges
+use only the database journal. `/ah recovery` lists database operations; for older file receipts,
+follow [the legacy receipt procedure](payment-recovery.md). Back up both journals during upgrades.
+
 - Stop every RoyalAuctions instance sharing the database before the first upgrade. Back up the
   auction database, economy data, and player data together. Install the new jar on all instances
   before allowing transactions. Older jars bypass these reservations and must not run alongside it.

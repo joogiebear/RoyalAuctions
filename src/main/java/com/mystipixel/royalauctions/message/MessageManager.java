@@ -39,6 +39,9 @@ public final class MessageManager {
 
     private String raw(String path) {
         String value = messages.getString(path);
+        if (value == null && path.equals("payment-pending")) {
+            return "&eAn auction payment is on hold. Staff can check its status; do not repeat the transaction.";
+        }
         return value == null ? path : value;
     }
 

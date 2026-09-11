@@ -29,12 +29,15 @@ public final class AuctionService {
     private final com.mystipixel.royalauctions.hooks.EconGuardHook econGuard;
     private final String worker = UUID.randomUUID().toString();
     private final ExternalEffectRunner effects;
+    private final PendingPayments legacyPayments;
     private final AtomicBoolean recovering = new AtomicBoolean();
     private long lastRecoveryWarning;
     private volatile int activeCache;
     private Consumer<UUID> eventReady = id -> {};
 
     public void eventNotifier(Consumer<UUID> notifier) { this.eventReady = notifier; }
+    /** Main-thread compatibility worker for file receipts created before the database journal. */
+    public void retryPayments() { legacyPayments.retryRejected(); }
 
     public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
                           CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
@@ -42,6 +45,9 @@ public final class AuctionService {
         this.plugin = plugin; this.db = db; this.transactions = db.transactions(); this.vault = vault;
         this.config = config; this.categories = categories; this.tiers = tiers;
         this.messages = messages; this.econGuard = econGuard;
+        // New exchanges use the database journal; old file receipts retain their original IDs.
+        legacyPayments = new PendingPayments(new PaymentJournal(plugin.getDataFolder().toPath().resolve("payments")),
+                vault, econGuard, plugin.getLogger());
         effects = new ExternalEffectRunner(transactions, this::async, this::sync, worker,
                 e -> logError("processing an external effect; check /ah recovery", e));
         plugin.getLogger().info("Auction recovery worker: " + worker);

@@ -89,3 +89,5 @@ exchange:
   declined: "{prefix}&eThe exchange could not be completed. Your previous auction and collection state was retained."
   invalid-listing: "{prefix}&cInvalid listing price or duration."
   purchased: "{prefix}&aPurchase completed. Your item is saved in &f/ah collect&a."
+
+payment-pending: "{prefix}&eAn auction payment is on hold. Staff can check its status; do not repeat the transaction."
