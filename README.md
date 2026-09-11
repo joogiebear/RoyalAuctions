@@ -21,6 +21,7 @@ Part of a suite with [RoyalBank](https://github.com/joogiebear/RoyalBank),
 - [Item tiers](#item-tiers)
 - [Confirmations](#confirmations)
 - [Storage](#storage)
+- [Reliability and recovery](#reliability-and-recovery)
 - [PlaceholderAPI](#placeholderapi)
 - [NPCs (Citizens)](#npcs-citizens)
 - [Building](#building)
@@ -65,6 +66,7 @@ Base command `/auctionhouse`, aliases **`/ah`**, `/auctions`, `/auction`.
 | `/ah <username>` | View that player's active auctions |
 | `/ah category` | **Admin.** Inspect the held item: category, *which rule matched*, and tier |
 | `/ah reload` | **Admin.** Reload config, categories, menus, rarities |
+| `/ah recovery [page]` | **Admin.** Inspect pending exchanges and held operations |
 
 ## Permissions
 
@@ -72,7 +74,7 @@ Base command `/auctionhouse`, aliases **`/ah`**, `/auctions`, `/auction`.
 |---|---|---|
 | `royalauctions.use` | `true` | Open and browse |
 | `royalauctions.sell` | `true` | List items |
-| `royalauctions.admin` | `op` | `/ah reload`, `/ah category` |
+| `royalauctions.admin` | `op` | `/ah reload`, `/ah category`, `/ah recovery` |
 
 > NPCs run commands **as the clicking player**, so they inherit that player's permissions. If you
 > restrict `royalauctions.use`, a player without it clicking the NPC gets nothing — that's expected.
@@ -327,7 +329,9 @@ storage:
     pool-size: 10
 ```
 
-HikariCP over JDBC. Tables: `ra_listings`, `ra_collection`, `ra_bids`.
+HikariCP over JDBC. Listings, collection items, bids and notifications are stored alongside a
+persistent operation journal, resource reservations, and operator reconciliation history.
+MySQL requires InnoDB tables; SQLite uses WAL with full synchronous commits.
 
 Items are stored with Paper's `serializeAsBytes()`, which preserves the **full** NBT/component data
 — so eco custom items survive a listing intact with no per-plugin code, and even survive the eco
@@ -337,6 +341,21 @@ plugin being uninstalled.
 > outbid there was no record you had ever bid — which made "auctions I've bid on" unknowable. Every
 > bid is now recorded. It is **not backfillable**: only bids placed from this version on appear in
 > View Bids.
+
+## Reliability and recovery
+
+Bids and purchases reserve the listing before charging. Expiry checks the current deadline and
+funded leader under the same reservation. Closing an auction saves its outcome, collection item,
+and seller payment obligation in one database transaction. Refunds and seller payments remain
+queued until successfully processed; confirmed failures are retried.
+
+Items selected in the sell menu enter persistent custody. Collection claims retain the saved
+item until inventory delivery is acknowledged. If a crash leaves a Vault payment or inventory
+change uncertain, the exchange is held for staff review rather than automatically repeated.
+
+See [the recovery and upgrade guide](docs/RECOVERY.md) for `/ah recovery`, console reconciliation,
+shared-server upgrades, guarantees and limitations. Stop and upgrade **all** servers sharing the
+database together. Test the update on staging with your economy and inventory plugins first.
 
 ## PlaceholderAPI
 
@@ -360,7 +379,7 @@ an NPC set to run it as console will just print "player only".
 ## Building
 
 ```bash
-mvn -DskipTests package     # -> target/RoyalAuctions.jar
+mvn package                # tests + target/RoyalAuctions.jar
 ```
 
 Java 21, Maven. `eco` is a `provided` dependency resolved from the Auxilor repo. Versioning is

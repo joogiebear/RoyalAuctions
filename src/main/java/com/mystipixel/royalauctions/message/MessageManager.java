@@ -29,6 +29,11 @@ public final class MessageManager {
             plugin.saveResource("messages.yml", false);
         }
         this.messages = YamlConfiguration.loadConfiguration(file);
+        // New recovery messages work on upgrade without overwriting the server's translations.
+        try (var stream = plugin.getResource("messages.yml")) {
+            if (stream != null) messages.setDefaults(YamlConfiguration.loadConfiguration(
+                    new java.io.InputStreamReader(stream, java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.io.IOException e) { plugin.getLogger().warning("Could not load default messages: " + e.getMessage()); }
         this.prefix = messages.getString("prefix", "");
     }
 

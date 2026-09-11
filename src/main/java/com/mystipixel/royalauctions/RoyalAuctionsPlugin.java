@@ -43,6 +43,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
     private GuiManager guiManager;
 
     private BukkitTask expiryTask;
+    private BukkitTask recoveryTask;
     private BukkitTask pruneTask;
     private AuctionPlaceholderExpansion placeholderExpansion;
     private boolean fullyEnabled;
@@ -114,8 +115,9 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         this.guiManager = new GuiManager(this, service, config, categories, tiers, messages, vault, menus, signInput);
 
         getServer().getPluginManager().registerEvents(new AuctionGuiListener(guiManager), this);
-        getServer().getPluginManager().registerEvents(
-                new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault), this);
+        var notifier = new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault);
+        getServer().getPluginManager().registerEvents(notifier, this);
+        service.eventNotifier(notifier::notifyOnline);
 
         AuctionCommand command = new AuctionCommand(this, guiManager, messages);
         if (getCommand("auctionhouse") != null) {
@@ -125,6 +127,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
 
         scheduleExpiryTask();
         schedulePruneTask();
+        recoveryTask = getServer().getScheduler().runTaskTimerAsynchronously(this, service::recover, 1L, 100L);
         service.refreshActiveCount();
         // The browse menu only repairs the categories it draws, so sweep everything once on startup.
         service.repairCategoriesOnStartup();
@@ -175,15 +178,9 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (pruneTask != null) {
             pruneTask.cancel();
         }
-        // Return anything still escrowed in a create-flow BEFORE the database closes. An item
-        // deposited into the sell menu lives only in memory until the listing is confirmed, so a
-        // restart at that moment would destroy it outright.
-        if (guiManager != null && database != null) {
-            int returned = guiManager.drainEscrowToCollection();
-            if (returned > 0) {
-                getLogger().info("Returned " + returned + " escrowed auction item(s) to their owners' collection.");
-            }
-        }
+        if (recoveryTask != null) recoveryTask.cancel();
+        // Create-session items are already durable. Do not duplicate pending listings on shutdown.
+        if (guiManager != null) guiManager.clearCreateSessions();
         if (placeholderExpansion != null) {
             placeholderExpansion.unregister();
         }

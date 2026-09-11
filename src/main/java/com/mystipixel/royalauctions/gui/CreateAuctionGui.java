@@ -58,7 +58,7 @@ public final class CreateAuctionGui extends CreateFlowGui {
     @Override
     public void onClick(InventoryClickEvent event) {
         CreateSession s = manager.session(player.getUniqueId());
-        if (s == null) {
+        if (s == null || s.busy()) {
             return;
         }
 
@@ -67,10 +67,8 @@ public final class CreateAuctionGui extends CreateFlowGui {
             if (!s.hasItem() && event.getClickedInventory() != null) {
                 ItemStack clicked = event.getCurrentItem();
                 if (clicked != null && !clicked.getType().isAir()) {
-                    s.item(clicked.clone());
-                    event.getClickedInventory().setItem(event.getSlot(), null);
-                    player.updateInventory();
-                    render();
+                    if (event.getClickedInventory() != player.getInventory()) return;
+                    manager.captureCreateItem(player, event.getSlot(), clicked.clone());
                 }
             }
             return;
@@ -79,9 +77,7 @@ public final class CreateAuctionGui extends CreateFlowGui {
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
             case REMOVE_ITEM -> {
                 if (s.hasItem()) {
-                    manager.service().returnItem(player, s.item());
-                    s.item(null);
-                    render();
+                    manager.removeCreateItem(player);
                 }
             }
             case SET_PRICE -> manager.beginPriceInput(player);

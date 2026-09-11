@@ -22,7 +22,7 @@ libraries:
 commands:
   auctionhouse:
     description: Open and manage the Auction House.
-    usage: /ah [sell <price>|search <query>|collect|listings|reload]
+    usage: /ah [sell|search <query>|collect|listings|reload|recovery]
     aliases: [ah, auctions, auction]
 permissions:
   royalauctions.use:
@@ -32,5 +32,5 @@ permissions:
     description: List items for sale.
     default: true
   royalauctions.admin:
-    description: Reload config and manage any listing.
+    description: Reload config, inspect categories, and review recovery operations.
     default: op
