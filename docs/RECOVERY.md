@@ -56,7 +56,9 @@ in collection; claims no longer drop overflow on the ground.
    and last update time. The log warns once per minute while `APPLYING` entries older than two
    minutes remain. Resource locks deliberately do not expire.
 2. **Stop the process that owned the operation.** The origin UUID identifies a process, not a
-   permanent server name. Do not merely pause it or rely on heartbeat timeout: a suspended process
+   permanent server name; each server logs `Auction recovery worker: <UUID>` at startup.
+   If the originating process cannot be identified, stop all servers sharing this database.
+   Do not merely pause it or rely on heartbeat timeout: a suspended process
    could resume its already queued external effect. A full stop followed by restart creates a new
    worker ID. For a shared database, identify and stop the old process on the relevant server.
 3. Keep the affected account/inventory isolated while checking the economy provider's transaction

@@ -44,6 +44,7 @@ public final class AuctionService {
         this.messages = messages; this.econGuard = econGuard;
         effects = new ExternalEffectRunner(transactions, this::async, this::sync, worker,
                 e -> logError("processing an external effect; check /ah recovery", e));
+        plugin.getLogger().info("Auction recovery worker: " + worker);
     }
     private void async(Runnable r) { if (plugin.isEnabled()) Bukkit.getScheduler().runTaskAsynchronously(plugin, r); }
     private void sync(Runnable r) { if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, r); }
