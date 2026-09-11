@@ -4,13 +4,18 @@ import com.mystipixel.royalauctions.data.ListingType;
 import org.bukkit.inventory.ItemStack;
 
 /**
- * Per-player state for the GUI create-auction flow. The item lives here (in escrow) from the
- * moment it is deposited until the listing is confirmed or the flow is cancelled, so it is never
- * left in a menu that could be closed and lost.
+ * Per-player view of the create-auction flow. The item is held in persistent collection storage;
+ * this session only remembers its ID and a display copy after capture is confirmed.
  */
 public final class CreateSession {
 
     private ItemStack item;
+    private java.util.UUID collectionId;
+    private boolean busy;
+    public java.util.UUID collectionId() { return collectionId; }
+    public void collectionId(java.util.UUID value) { collectionId = value; }
+    public boolean busy() { return busy; }
+    public void busy(boolean value) { busy = value; }
     private double price;
     private int durationHours;
     private ListingType type;
@@ -75,6 +80,6 @@ public final class CreateSession {
     }
 
     public boolean isReady() {
-        return hasItem() && hasPrice();
+        return hasItem() && collectionId != null && hasPrice() && !busy;
     }
 }

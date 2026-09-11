@@ -36,6 +36,9 @@ public final class AuctionDatabase {
 
     private Type type;
     private HikariDataSource dataSource;
+    private AuctionTransactions transactions;
+
+    public AuctionTransactions transactions() { return transactions; }
 
     public AuctionDatabase(File dataFolder, ConfigurationSection storageConfig, Logger logger) {
         this.dataFolder = dataFolder;
@@ -74,11 +77,18 @@ public final class AuctionDatabase {
             hikari.setDriverClassName("org.sqlite.JDBC");
             // SQLite is a single-writer engine; one pooled connection + WAL avoids SQLITE_BUSY.
             hikari.setMaximumPoolSize(1);
-            hikari.setConnectionInitSql("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+            hikari.setConnectionInitSql("PRAGMA synchronous=FULL");
         }
 
         this.dataSource = new HikariDataSource(hikari);
+        if (type == Type.SQLITE) {
+            try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+                s.execute("PRAGMA journal_mode=WAL");
+            }
+        }
         createSchema();
+        transactions = new AuctionTransactions(dataSource);
+        transactions.init();
         logger.info("Connected to " + type + " storage.");
     }
 
@@ -220,12 +230,12 @@ public final class AuctionDatabase {
 
     // ------------------------------------------------------------------ listings
 
-    public void insertListing(Listing l) throws SQLException {
+    static void insertListing(Connection c, Listing l, ListingStatus status) throws SQLException {
         String sql = "INSERT INTO ra_listings "
                 + "(id,seller_id,seller_name,item_data,display_name,category,tier,type,price,"
                 + "current_bid,top_bidder_id,top_bidder_name,bid_count,created_at,expires_at,status) "
                 + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, l.id().toString());
             ps.setString(2, l.sellerId().toString());
             ps.setString(3, l.sellerName());
@@ -241,7 +251,7 @@ public final class AuctionDatabase {
             ps.setInt(13, l.bidCount());
             ps.setLong(14, l.createdAt());
             ps.setLong(15, l.expiresAt());
-            ps.setString(16, l.status().name());
+            ps.setString(16, status.name());
             ps.executeUpdate();
         }
     }
@@ -434,209 +444,6 @@ public final class AuctionDatabase {
         }
     }
 
-    /** Atomically flip ACTIVE→SOLD. Returns true only if this call is the one that sold it. */
-    public boolean markSoldIfActive(UUID id, UUID buyerId, long soldAt) throws SQLException {
-        String sql = "UPDATE ra_listings SET status='SOLD', buyer_id=?, sold_at=? WHERE id=? AND status='ACTIVE'";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, buyerId.toString());
-            ps.setLong(2, soldAt);
-            ps.setString(3, id.toString());
-            return ps.executeUpdate() == 1;
-        }
-    }
-
-    /**
-     * Atomically finalise a won auction, but only if the bid state the sweep read is still current —
-     * {@code bid_count} acts as the optimistic lock, exactly as in {@link #placeBid}. A false return
-     * means a bid landed between the sweep's read and this flip; the sweep skips the listing and the
-     * next pass finalises it from the fresh row, so the newer bidder is never silently overpaid past.
-     */
-    public boolean markAuctionSoldIfUnchanged(UUID id, UUID buyerId, long soldAt, int expectedBidCount)
-            throws SQLException {
-        String sql = "UPDATE ra_listings SET status='SOLD', buyer_id=?, sold_at=? "
-                + "WHERE id=? AND status='ACTIVE' AND bid_count=?";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, buyerId.toString());
-            ps.setLong(2, soldAt);
-            ps.setString(3, id.toString());
-            ps.setInt(4, expectedBidCount);
-            return ps.executeUpdate() == 1;
-        }
-    }
-
-    /** Undo a SOLD flip if the buyer's payment failed after we reserved the listing. */
-    public boolean revertSold(UUID id, UUID buyerId) throws SQLException {
-        String sql = "UPDATE ra_listings SET status='ACTIVE', buyer_id=NULL, sold_at=NULL "
-                + "WHERE id=? AND status='SOLD' AND buyer_id=?";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, id.toString());
-            ps.setString(2, buyerId.toString());
-            return ps.executeUpdate() == 1;
-        }
-    }
-
-    /** Result of a bid attempt, including who to refund if this bid outbid someone. */
-    public static final class BidOutcome {
-        public final boolean success;
-        public final UUID previousBidderId; // null if this was the first bid or on failure
-        public final String previousBidderName;
-        public final double previousBid;
-        public final String failureReason;  // "GONE" or "OUTBID" when success is false
-        /** True when this bid landed inside the anti-snipe window and pushed the end time back. */
-        public final boolean extended;
-        /** The listing's end time after this bid (extended or not); 0 on failure. */
-        public final long expiresAt;
-
-        private BidOutcome(boolean success, UUID previousBidderId, String previousBidderName,
-                           double previousBid, String failureReason, boolean extended, long expiresAt) {
-            this.success = success;
-            this.previousBidderId = previousBidderId;
-            this.previousBidderName = previousBidderName;
-            this.previousBid = previousBid;
-            this.failureReason = failureReason;
-            this.extended = extended;
-            this.expiresAt = expiresAt;
-        }
-
-        static BidOutcome ok(UUID prevBidder, String prevName, double prevBid, boolean extended, long expiresAt) {
-            return new BidOutcome(true, prevBidder, prevName, prevBid, null, extended, expiresAt);
-        }
-
-        static BidOutcome fail(String reason) {
-            return new BidOutcome(false, null, null, 0, reason, false, 0L);
-        }
-    }
-
-    /**
-     * Place a bid inside a transaction, using the row's {@code bid_count} as an optimistic lock so
-     * two concurrent bids can't both win. Returns who previously led (to refund them) on success.
-     *
-     * <p>{@code antiSnipeMillis > 0} enables the anti-snipe extension: a bid landing inside that
-     * window before expiry pushes {@code expires_at} back out to a full window away, in the same
-     * transaction as the bid itself, so a last-second bid can always be answered.
-     */
-    public BidOutcome placeBid(UUID id, UUID bidderId, String bidderName, double amount,
-                               long antiSnipeMillis) throws SQLException {
-        try (Connection c = dataSource.getConnection()) {
-            c.setAutoCommit(false);
-            try {
-                UUID prevBidder = null;
-                String prevBidderName = null;
-                double prevBid = 0;
-                int seenCount;
-                long expiresAt;
-                try (PreparedStatement sel = c.prepareStatement(
-                        "SELECT status, current_bid, top_bidder_id, top_bidder_name, bid_count, expires_at "
-                        + "FROM ra_listings WHERE id=?")) {
-                    sel.setString(1, id.toString());
-                    try (ResultSet rs = sel.executeQuery()) {
-                        if (!rs.next()) {
-                            c.rollback();
-                            return BidOutcome.fail("GONE");
-                        }
-                        if (!"ACTIVE".equals(rs.getString("status"))) {
-                            c.rollback();
-                            return BidOutcome.fail("GONE");
-                        }
-                        // A row can sit expired-but-ACTIVE until the sweep reaches it. A bid accepted
-                        // in that window races the sweep's finalisation — the sweep pays out the state
-                        // it already read, and this bidder would be charged for nothing.
-                        expiresAt = rs.getLong("expires_at");
-                        if (expiresAt <= System.currentTimeMillis()) {
-                            c.rollback();
-                            return BidOutcome.fail("GONE");
-                        }
-                        double curBid = rs.getDouble("current_bid");
-                        seenCount = rs.getInt("bid_count");
-                        String prevBidderStr = rs.getString("top_bidder_id");
-                        if (seenCount > 0 && amount <= curBid) {
-                            c.rollback();
-                            return BidOutcome.fail("OUTBID");
-                        }
-                        if (seenCount > 0 && prevBidderStr != null) {
-                            prevBidder = UUID.fromString(prevBidderStr);
-                            prevBidderName = rs.getString("top_bidder_name");
-                            prevBid = curBid;
-                        }
-                    }
-                }
-                // Anti-snipe: a bid inside the window pushes the end back out to a full window away.
-                long now = System.currentTimeMillis();
-                boolean extended = antiSnipeMillis > 0 && expiresAt - now < antiSnipeMillis;
-                long newExpiresAt = extended ? now + antiSnipeMillis : expiresAt;
-
-                try (PreparedStatement upd = c.prepareStatement(
-                        "UPDATE ra_listings SET current_bid=?, top_bidder_id=?, top_bidder_name=?, "
-                        + "bid_count=bid_count+1, expires_at=? WHERE id=? AND status='ACTIVE' AND bid_count=?")) {
-                    upd.setDouble(1, amount);
-                    upd.setString(2, bidderId.toString());
-                    upd.setString(3, bidderName);
-                    upd.setLong(4, newExpiresAt);
-                    upd.setString(5, id.toString());
-                    upd.setInt(6, seenCount);
-                    if (upd.executeUpdate() != 1) {
-                        c.rollback();
-                        return BidOutcome.fail("OUTBID"); // lost the optimistic race
-                    }
-                }
-                // Record the bid itself. The listing row only ever remembers the *current* leader, so
-                // without this there'd be no way to know which auctions a player has bid on once outbid.
-                try (PreparedStatement ins = c.prepareStatement(
-                        "INSERT INTO ra_bids (listing_id, bidder_id, bidder_name, amount, created_at) "
-                        + "VALUES (?,?,?,?,?)")) {
-                    ins.setString(1, id.toString());
-                    ins.setString(2, bidderId.toString());
-                    ins.setString(3, bidderName);
-                    ins.setDouble(4, amount);
-                    ins.setLong(5, System.currentTimeMillis());
-                    ins.executeUpdate();
-                }
-                c.commit();
-                return BidOutcome.ok(prevBidder, prevBidderName, prevBid, extended, newExpiresAt);
-            } catch (SQLException e) {
-                c.rollback();
-                throw e;
-            } finally {
-                c.setAutoCommit(true);
-            }
-        }
-    }
-
-    /** Roll a bid back to the previous leader if charging the new bidder failed. */
-    public boolean revertBid(UUID id, UUID newBidderId, UUID prevBidderId, String prevBidderName, double prevBid)
-            throws SQLException {
-        String sql = "UPDATE ra_listings SET current_bid=?, top_bidder_id=?, top_bidder_name=?, "
-                + "bid_count=bid_count-1 WHERE id=? AND status='ACTIVE' AND top_bidder_id=?";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setDouble(1, prevBid);
-            ps.setString(2, prevBidderId == null ? null : prevBidderId.toString());
-            ps.setString(3, prevBidderName);
-            ps.setString(4, id.toString());
-            ps.setString(5, newBidderId.toString());
-            return ps.executeUpdate() == 1;
-        }
-    }
-
-    /** Atomically flip ACTIVE→CANCELLED for the owning seller, but never once a bid has landed. */
-    public boolean cancelIfActive(UUID id, UUID sellerId) throws SQLException {
-        String sql = "UPDATE ra_listings SET status='CANCELLED' "
-                + "WHERE id=? AND seller_id=? AND status='ACTIVE' AND bid_count=0";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, id.toString());
-            ps.setString(2, sellerId.toString());
-            return ps.executeUpdate() == 1;
-        }
-    }
-
-    /** Atomically flip ACTIVE→EXPIRED. Returns true only for the caller that expired it. */
-    public boolean markExpiredIfActive(UUID id) throws SQLException {
-        String sql = "UPDATE ra_listings SET status='EXPIRED' WHERE id=? AND status='ACTIVE'";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, id.toString());
-            return ps.executeUpdate() == 1;
-        }
-    }
-
     public List<Listing> dueExpirations(long now) throws SQLException {
         List<Listing> out = new ArrayList<>();
         String sql = "SELECT * FROM ra_listings WHERE status='ACTIVE' AND expires_at<=?";
@@ -666,7 +473,7 @@ public final class AuctionDatabase {
     public int pruneClosed(long cutoff) throws SQLException {
         int removed;
         try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
-                "DELETE FROM ra_listings WHERE status<>'ACTIVE' AND COALESCE(sold_at, expires_at) < ?")) {
+                "DELETE FROM ra_listings WHERE status IN ('SOLD','EXPIRED','CANCELLED') AND COALESCE(sold_at, expires_at) < ? AND NOT EXISTS (SELECT 1 FROM ra_operations o WHERE o.listing_id=ra_listings.id AND o.state<>'DONE')")) {
             ps.setLong(1, cutoff);
             removed = ps.executeUpdate();
         }
@@ -701,39 +508,32 @@ public final class AuctionDatabase {
     /** Read and delete a player's queued events, oldest first. The caller re-queues on failed delivery. */
     public List<OfflineEvent> drainEvents(UUID player) throws SQLException {
         List<OfflineEvent> out = new ArrayList<>();
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
-                "SELECT type, item, amount, created_at FROM ra_events WHERE player_id=? ORDER BY created_at ASC")) {
-            ps.setString(1, player.toString());
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    out.add(new OfflineEvent(rs.getString("type"), rs.getString("item"),
+        // Delete only the rows actually read. Another transaction may enqueue a payment notice
+        // after this snapshot, and another server may try to deliver these same events.
+        var selected = new java.util.LinkedHashMap<Long, OfflineEvent>();
+        try (Connection c = dataSource.getConnection()) {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT id, type, item, amount, created_at FROM ra_events WHERE player_id=? ORDER BY created_at,id")) {
+                ps.setString(1, player.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) selected.put(rs.getLong("id"), new OfflineEvent(rs.getString("type"), rs.getString("item"),
                             rs.getDouble("amount"), rs.getLong("created_at")));
                 }
             }
-        }
-        if (!out.isEmpty()) {
-            try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
-                    "DELETE FROM ra_events WHERE player_id=?")) {
-                ps.setString(1, player.toString());
-                ps.executeUpdate();
-            }
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement("DELETE FROM ra_events WHERE id=?")) {
+                for (var entry : selected.entrySet()) {
+                    ps.setLong(1, entry.getKey());
+                    if (ps.executeUpdate() == 1) out.add(entry.getValue());
+                }
+                c.commit();
+            } catch (SQLException e) { c.rollback(); throw e; }
+            finally { c.setAutoCommit(true); }
         }
         return out;
     }
 
     // ------------------------------------------------------------------ collection
-
-    public void addCollectionItem(CollectionItem item) throws SQLException {
-        String sql = "INSERT INTO ra_collection (id,owner_id,item_data,reason,created_at) VALUES (?,?,?,?,?)";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, item.id().toString());
-            ps.setString(2, item.ownerId().toString());
-            ps.setString(3, ItemSerialization.toBase64(item.itemData()));
-            ps.setString(4, item.reason().name());
-            ps.setLong(5, item.createdAt());
-            ps.executeUpdate();
-        }
-    }
 
     public List<CollectionItem> collectionItems(UUID ownerId) throws SQLException {
         List<CollectionItem> out = new ArrayList<>();
@@ -749,19 +549,7 @@ public final class AuctionDatabase {
         return out;
     }
 
-    /** Atomically remove one collection row for its owner. True only if this call removed it. */
-    public boolean removeCollectionItem(UUID id, UUID ownerId) throws SQLException {
-        String sql = "DELETE FROM ra_collection WHERE id=? AND owner_id=?";
-        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, id.toString());
-            ps.setString(2, ownerId.toString());
-            return ps.executeUpdate() == 1;
-        }
-    }
-
-    // ------------------------------------------------------------------ mapping
-
-    private Listing mapListing(ResultSet rs) throws SQLException {
+    static Listing mapListing(ResultSet rs) throws SQLException {
         String topBidder = rs.getString("top_bidder_id");
         String typeStr = rs.getString("type");
         return new Listing(
@@ -783,7 +571,7 @@ public final class AuctionDatabase {
                 rs.getInt("bid_count"));
     }
 
-    private CollectionItem mapCollection(ResultSet rs) throws SQLException {
+    static CollectionItem mapCollection(ResultSet rs) throws SQLException {
         return new CollectionItem(
                 UUID.fromString(rs.getString("id")),
                 UUID.fromString(rs.getString("owner_id")),

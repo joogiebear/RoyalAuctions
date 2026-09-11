@@ -45,6 +45,12 @@ public final class AuctionCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        if (args.length > 0 && args[0].equalsIgnoreCase("recovery")) {
+            if (!sender.hasPermission("royalauctions.admin")) messages.send(sender, "general.no-permission");
+            else gui.service().recoveryCommand(sender, args);
+            return true;
+        }
+
         if (!(sender instanceof Player player)) {
             messages.send(sender, "general.player-only");
             return true;
@@ -163,6 +169,7 @@ public final class AuctionCommand implements CommandExecutor, TabCompleter {
             if (sender.hasPermission("royalauctions.admin") && "reload".startsWith(prefix)) {
                 out.add("reload");
             }
+            if (sender.hasPermission("royalauctions.admin") && "recovery".startsWith(prefix)) out.add("recovery");
             // Online player names, so /ah <username> tab-completes.
             for (Player online : Bukkit.getOnlinePlayers()) {
                 if (online.getName().toLowerCase(Locale.ROOT).startsWith(prefix)) {

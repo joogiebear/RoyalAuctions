@@ -68,10 +68,10 @@ bid:
   you-were-outbid: "{prefix}&eYou were outbid on &f{item}&e. &f{amount} &erefunded."
   new-bid-seller: "{prefix}&a{bidder} &abid &f{amount} &aon your &f{item}&a."
 
-# The while-you-were-away summary, replayed shortly after join for events that
-# happened while the player was offline.
+# Saved auction notifications, delivered after settlement/payment for online players,
+# or replayed shortly after join. Customize the header for both contexts.
 away:
-  header: "{prefix}&6While you were away:"
+  header: "{prefix}&6Recent auction activity:"
   sold: "{prefix} &a✔ Sold &f{item}&a for &f{amount}&a."
   outbid: "{prefix} &c⇧ Outbid on &f{item}&c — your &f{amount}&c was refunded."
   won: "{prefix} &6★ Won &f{item}&6 for &f{amount}&6 — claim it with &e/ah collect&6."
@@ -82,4 +82,12 @@ auction:
   won: "{prefix}&aYou won &f{item} &afor &f{amount}&a! Claim it in &f/ah collect&a."
   sold-seller: "{prefix}&aYour auction for &f{item} &asold to &f{buyer} &afor &f{amount}&a."
 
-payment-pending: "&eAn auction payment is on hold. Staff can check its status; do not repeat the transaction."
+exchange:
+  rejected: "{prefix}&e{reason}"
+  unconfirmed: "{prefix}&eThe exchange could not be confirmed. Check your collection or ask staff."
+  pending: "{prefix}&eThis exchange is pending recovery. Ask staff to check operation &f{operation}&e."
+  declined: "{prefix}&eThe exchange could not be completed. Your previous auction and collection state was retained."
+  invalid-listing: "{prefix}&cInvalid listing price or duration."
+  purchased: "{prefix}&aPurchase completed. Your item is saved in &f/ah collect&a."
+
+payment-pending: "{prefix}&eAn auction payment is on hold. Staff can check its status; do not repeat the transaction."

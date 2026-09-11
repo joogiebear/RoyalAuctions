@@ -1,4 +1,10 @@
-# Payment recovery
+# Legacy payment receipt recovery
+
+This page describes file receipts created by the earlier payment-recovery update. New exchanges
+now use the database journal described in [Auction reliability and recovery](RECOVERY.md).
+Existing file receipts retain the retry and reconciliation behavior below; do not move their
+obligations into the database journal or replay the original purchase. The remaining-crash-window
+section documents the earlier implementation, not the current database reservation flow.
 
 Payment receipts live in `payments/pending/<UUID>.properties`; closed receipts move to `payments/receipts/`. The leg records contain the recipient/account UUID, amount, direction, and result. Files are written using a flushed temporary file and atomic rename on the same filesystem. Unsupported atomic writes fail closed. This is not a transaction spanning Vault, player storage, and the auction database, nor a guarantee against every storage/power failure.
 
@@ -25,4 +31,7 @@ After resolving an unknown credit from provider history, archive its receipt onl
 
 This fixes known rejected credits and prevents blind retries of unknown **credit-call** outcomes. It does not make existing asynchronous listing/bid database transitions, buyer debits, item collection writes, and the new journal one atomic transaction. A crash before a credit intent is written (or a storage failure that prevents it) still needs reconciliation from the listing/provider records and severe server logs. Concurrent bid funding/expiry and collection-delivery crash windows remain separate work. No database schema or existing listing statuses are changed in this patch.
 
-Tests drive real purchase, bid-completion, expiry, and listing-fee failure service paths with a rejecting economy and deterministic scheduler doubles, plus restart retry, duplicate-credit prevention, audit failure, retry limits, and receipt write/corruption failures. They do not simulate a live-player database race or prove full crash atomicity.
+The current service tests drive purchases, bidding, expiry, and listing reservation failure through
+the public service API with real SQLite and a rejecting economy. They also cover upgrade retries
+of old receipts and preservation of unknown outcomes. Separate receipt tests retain duplicate-credit,
+audit-failure, retry-limit, write-failure and corruption coverage. They do not prove full crash atomicity.

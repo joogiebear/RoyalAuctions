@@ -47,6 +47,15 @@ public final class OfflineEventNotifier implements Listener {
         Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> deliver(id), DELAY_TICKS);
     }
 
+    /** Trigger the same queue for an online recipient; leave offline players' notices untouched. */
+    public void notifyOnline(UUID id) {
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null && player.isOnline())
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> deliver(id));
+        });
+    }
+
     private void deliver(UUID id) {
         List<OfflineEvent> events;
         try {

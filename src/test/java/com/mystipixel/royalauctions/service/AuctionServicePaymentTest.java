@@ -1,4 +1,5 @@
 package com.mystipixel.royalauctions.service;
+
 import com.mystipixel.royalauctions.data.*;
 import com.mystipixel.royalauctions.hooks.*;
 import com.mystipixel.royalauctions.config.PluginConfig;
@@ -6,129 +7,130 @@ import com.mystipixel.royalauctions.category.CategoryManager;
 import com.mystipixel.royalauctions.tier.TierManager;
 import com.mystipixel.royalauctions.message.MessageManager;
 import org.bukkit.*;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.*;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.MockedStatic;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.util.*;
-import java.util.function.Consumer;
 import java.util.logging.Logger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
+/** Public service paths against real SQLite and a rejecting/ambiguous Vault provider. */
 class AuctionServicePaymentTest {
     @TempDir Path folder;
     JavaPlugin plugin; AuctionDatabase db; VaultHook vault; EconGuardHook guard;
     PluginConfig config; CategoryManager categories; TierManager tiers; MessageManager messages;
-    PaymentJournal journal; PendingPayments payments; AuctionService service;
-    Player buyer, seller; Listing listing; MockedStatic<Bukkit> bukkit;
-    ItemStack item;
-    UUID buyerId = UUID.randomUUID(), sellerId = UUID.randomUUID(), listingId = UUID.randomUUID();
-    @BeforeEach void setup() {
-        plugin = mock(JavaPlugin.class); db = mock(AuctionDatabase.class); vault = mock(VaultHook.class);
-        guard = mock(EconGuardHook.class); config = mock(PluginConfig.class); categories = mock(CategoryManager.class);
-        tiers = mock(TierManager.class); messages = mock(MessageManager.class);
+    AuctionService service; Player buyer, seller; MockedStatic<Bukkit> bukkit;
+    final UUID buyerId = UUID.randomUUID(), sellerId = UUID.randomUUID();
+    final byte[] bytes = {1, 2, 3};
+
+    @BeforeEach void setup() throws Exception {
+        plugin = mock(JavaPlugin.class); vault = mock(VaultHook.class); guard = mock(EconGuardHook.class);
+        config = mock(PluginConfig.class); categories = mock(CategoryManager.class); tiers = mock(TierManager.class); messages = mock(MessageManager.class);
         when(plugin.getDataFolder()).thenReturn(folder.toFile()); when(plugin.getLogger()).thenReturn(Logger.getLogger("test"));
-        when(plugin.isEnabled()).thenReturn(true); when(config.instantDeliver()).thenReturn(true);
-        journal = new PaymentJournal(folder.resolve("payments"));
-        payments = new PendingPayments(journal, vault, guard, Logger.getLogger("test"));
-        service = new AuctionService(plugin, db, vault, config, categories, tiers, messages, guard, payments);
-        buyer = player("buyer"); seller = player("seller");
+        when(plugin.isEnabled()).thenReturn(true); when(config.instantDeliver()).thenReturn(false);
+        buyer = player(buyerId, "buyer"); seller = player(sellerId, "seller");
         bukkit = mockStatic(Bukkit.class);
         bukkit.when(() -> Bukkit.getOfflinePlayer(buyerId)).thenReturn(buyer);
         bukkit.when(() -> Bukkit.getOfflinePlayer(sellerId)).thenReturn(seller);
         bukkit.when(() -> Bukkit.getPlayer(sellerId)).thenReturn(seller);
         bukkit.when(() -> Bukkit.getPlayer(buyerId)).thenReturn(buyer);
-        BukkitScheduler scheduler = mock(BukkitScheduler.class);
-        bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class); bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
         when(scheduler.runTask(eq(plugin), any(Runnable.class))).thenAnswer(i -> { ((Runnable)i.getArgument(1)).run(); return mock(BukkitTask.class); });
         when(scheduler.runTaskAsynchronously(eq(plugin), any(Runnable.class))).thenAnswer(i -> { ((Runnable)i.getArgument(1)).run(); return mock(BukkitTask.class); });
-        item = mock(ItemStack.class); when(item.getType()).thenReturn(Material.STONE);
-        listing = mock(Listing.class); when(listing.id()).thenReturn(listingId);
-        doReturn(sellerId).when(listing).sellerId(); when(listing.sellerName()).thenReturn("seller");
-        when(listing.item()).thenReturn(item); when(listing.displayName()).thenReturn("test item");
-        when(listing.itemData()).thenReturn(new byte[]{1, 2, 3}); when(vault.withdraw(any(), anyDouble())).thenReturn(true);
-        when(vault.has(any(), anyDouble())).thenReturn(true);
+        when(vault.withdraw(any(), anyDouble())).thenReturn(true); when(config.bidIncrementFor(anyDouble())).thenReturn(10d);
+        open();
     }
-    @AfterEach void close() { bukkit.close(); }
-    Player player(String name) {
-        Player p = mock(Player.class); when(p.getUniqueId()).thenReturn(name.equals("buyer") ? buyerId : sellerId); when(p.getName()).thenReturn(name);
-        PlayerInventory inventory = mock(PlayerInventory.class); when(p.getInventory()).thenReturn(inventory);
-        when(inventory.addItem(any(ItemStack[].class))).thenReturn(new HashMap<>());
-        return p;
+    void open() throws Exception {
+        db = new AuctionDatabase(folder.toFile(), new YamlConfiguration(), Logger.getLogger("test")); db.init();
+        service = new AuctionService(plugin, db, vault, config, categories, tiers, messages, guard);
     }
-    void purchase() throws Exception {
-        var method = AuctionService.class.getDeclaredMethod("completePurchase", Player.class, Listing.class, double.class, Runnable.class);
-        method.setAccessible(true); method.invoke(service, buyer, listing, 50d, (Runnable)() -> {});
+    @AfterEach void close() { if (db != null) db.close(); if (bukkit != null) bukkit.close(); }
+    Player player(UUID id, String name) {
+        Player p = mock(Player.class); when(p.getUniqueId()).thenReturn(id); when(p.getName()).thenReturn(name); when(p.isOnline()).thenReturn(true); return p;
     }
+    void complete(AuctionTransactions.Operation o) throws Exception {
+        assertTrue(db.transactions().begin(o.id(), "fixture")); db.transactions().acknowledge(o.id(), true); db.transactions().finish(o.id());
+    }
+    Listing seed(ListingType type) throws Exception {
+        var captured = db.transactions().reserveCapture(sellerId, "seller", bytes, "fixture").operation(); complete(captured);
+        var l = new Listing(UUID.randomUUID(), sellerId, "seller", bytes, "test item", "misc", null, type, 50,
+                System.currentTimeMillis(), System.currentTimeMillis() + 60_000, ListingStatus.ACTIVE, 0, null, null, 0);
+        complete(db.transactions().reserveCreate(l, captured.collection(), 0, -1, "fixture").operation()); return l;
+    }
+    void sql(String sql) throws Exception {
+        try (var c = DriverManager.getConnection("jdbc:sqlite:" + folder.resolve("auctions.db")); var s = c.createStatement()) { s.executeUpdate(sql); }
+    }
+    AuctionTransactions.Operation owed() throws Exception { return db.transactions().pending(50).stream().filter(o -> o.kind() == AuctionTransactions.Kind.PAYOUT).findFirst().orElseThrow(); }
+
     @Test void rejectedSellerCreditRemainsOwedAndIsNotAuditedAsPaid() throws Exception {
-        when(vault.deposit(seller, 50)).thenReturn(false);
-        purchase();
-        assertEquals(1, journal.pending().size());
+        service.purchase(buyer, seed(ListingType.BIN), () -> {}); service.recover();
+        assertEquals(AuctionTransactions.State.READY, owed().state()); assertEquals(1, db.collectionItems(buyerId).size());
         verify(guard, never()).report(eq(sellerId), any(), eq("sale"), anyDouble(), eq(true), any(), any(), any());
-        verify(messages).send(seller, "payment-pending");
-        verify(buyer.getInventory()).addItem(any(ItemStack[].class));
+        verify(vault).withdraw(buyer, 50); verify(vault).deposit(seller, 50);
     }
     @Test void pendingSellerCreditRetriesAfterRestartWithoutChargingBuyerAgain() throws Exception {
         when(vault.deposit(seller, 50)).thenReturn(false, true);
-        purchase();
-        new PendingPayments(new PaymentJournal(folder.resolve("payments")), vault, guard, Logger.getLogger("test")).retryRejected();
-        payments.retryRejected();
-        verify(vault).withdraw(buyer, 50);
-        verify(vault, times(2)).deposit(seller, 50);
-        assertTrue(journal.pending().isEmpty());
-        verify(guard).report(eq(sellerId), eq("seller"), eq("sale"), eq(50d), eq(true), eq(buyerId), eq("buyer"), anyString());
+        service.purchase(buyer, seed(ListingType.BIN), () -> {}); service.recover();
+        db.close(); open(); sql("UPDATE ra_operations SET updated_at=0 WHERE state='READY'"); service.recover(); service.recover();
+        verify(vault).withdraw(buyer, 50); verify(vault, times(2)).deposit(seller, 50);
+        assertTrue(db.transactions().pending(50).isEmpty());
+        verify(guard).report(eq(sellerId), eq("seller"), eq("sale"), eq(50d), eq(true), eq(buyerId), eq("buyer"), eq("test item"));
     }
     @Test void rejectedOutbidRefundIsPersistedWithoutClaimingRefundSuccess() throws Exception {
-        var factory = AuctionDatabase.BidOutcome.class.getDeclaredMethod("ok", UUID.class, String.class, double.class, boolean.class, long.class);
-        factory.setAccessible(true);
-        var outcome = (AuctionDatabase.BidOutcome)factory.invoke(null, sellerId, "seller", 30d, false, 100L);
-        var method = AuctionService.class.getDeclaredMethod("completeBid", Player.class, Listing.class, double.class, AuctionDatabase.BidOutcome.class, Runnable.class);
-        method.setAccessible(true); method.invoke(service, buyer, listing, 50d, outcome, (Runnable)() -> {});
-        assertEquals(1, journal.pending().size());
+        Listing l = seed(ListingType.AUCTION);
+        complete(db.transactions().reserveBid(l.id(), buyerId, "buyer", 50, amount -> 10, 0, "fixture").operation());
+        Player next = player(UUID.randomUUID(), "next"); service.placeBid(next, l, 60, () -> {}); service.recover();
+        assertEquals(buyerId, owed().player()); assertEquals(50, owed().amount()); verify(vault).deposit(buyer, 50);
         verify(guard, never()).report(any(), any(), eq("bid-refund"), anyDouble(), eq(true), any(), any(), any());
-        verify(messages).send(seller, "payment-pending");
     }
     @Test void expiryPayoutRejectionLeavesRecoverableCredit() throws Exception {
-        when(listing.type()).thenReturn(ListingType.AUCTION); when(listing.hasBids()).thenReturn(true);
-        doReturn(buyerId).when(listing).topBidderId(); when(listing.currentBid()).thenReturn(50d);
-        when(db.dueExpirations(anyLong())).thenReturn(List.of(listing));
-        when(db.markAuctionSoldIfUnchanged(eq(listingId), eq(buyerId), anyLong(), anyInt())).thenReturn(true);
-        service.sweepExpired();
-        assertEquals(1, journal.pending().size());
+        Listing l = seed(ListingType.AUCTION); service.placeBid(buyer, l, 50, () -> {});
+        sql("UPDATE ra_listings SET expires_at=0"); service.sweepExpired(); service.recover();
+        assertEquals(AuctionTransactions.State.READY, owed().state()); assertEquals(1, db.collectionItems(buyerId).size());
         verify(guard, never()).report(any(), any(), eq("auction-sale"), anyDouble(), eq(true), any(), any(), any());
-        when(vault.deposit(seller, 50)).thenReturn(true); payments.retryRejected();
-        assertTrue(journal.pending().isEmpty());
+        when(vault.deposit(seller, 50)).thenReturn(true); sql("UPDATE ra_operations SET updated_at=0 WHERE state='READY'"); service.recover();
+        assertTrue(db.transactions().pending(50).isEmpty());
     }
-    @Test void listingInsertFailureRetainsRejectedFeeRefund() throws Exception {
-        when(config.maxPerPlayer()).thenReturn(-1); when(config.feeFor(50)).thenReturn(5d);
-        doThrow(new java.sql.SQLException("insert rejected")).when(db).insertListing(any());
+    @Test void listingReservationFailureNeverChargesFeeOrNeedsRefund() throws Exception {
+        when(config.maxPerPlayer()).thenReturn(-1); when(config.feeFor(50)).thenReturn(5d); when(config.canSellCategory(any())).thenReturn(true);
+        when(categories.categorize(any())).thenReturn("misc");
+        ItemStack item = mock(ItemStack.class); when(item.getType()).thenReturn(Material.STONE);
         try (var serialization = mockStatic(ItemSerialization.class)) {
-            serialization.when(() -> ItemSerialization.serialize(item)).thenReturn(new byte[]{1, 2, 3});
-            var method = AuctionService.class.getDeclaredMethod("finishListing", Player.class, ItemStack.class, double.class, ListingType.class, long.class, int.class, Consumer.class);
-            method.setAccessible(true); method.invoke(service, seller, item, 50d, ListingType.BIN, 1000L, 0, (Consumer<Boolean>) ok -> assertFalse(ok));
+            serialization.when(() -> ItemSerialization.serialize(item)).thenReturn(bytes);
+            service.createListing(seller, UUID.randomUUID(), item, 50, ListingType.BIN, 60_000, Assertions::assertFalse);
         }
-        assertEquals(1, journal.pending().size());
-        assertEquals("listing-fee-refund", journal.pending().values().iterator().next().getProperty("reason"));
+        verify(vault, never()).withdraw(any(), anyDouble()); verify(vault, never()).deposit(any(), anyDouble());
+        assertTrue(db.transactions().pending(50).isEmpty());
     }
     @Test void unknownSellerCreditDoesNotRetryOnTickOrRestart() throws Exception {
         when(vault.deposit(seller, 50)).thenThrow(new IllegalStateException("provider may have paid"));
-        purchase(); payments.retryRejected();
-        new PendingPayments(new PaymentJournal(folder.resolve("payments")), vault, guard, Logger.getLogger("test")).retryRejected();
-        verify(vault).deposit(seller, 50);
-        assertEquals("IN_FLIGHT", journal.pending().values().iterator().next().getProperty("leg.credit.status"));
+        service.purchase(buyer, seed(ListingType.BIN), () -> {}); service.recover();
+        db.close(); open(); service.recover(); service.retryPayments();
+        verify(vault).deposit(seller, 50); assertEquals(AuctionTransactions.State.APPLYING, owed().state());
     }
-    @Test void repeatedCreditRequestDoesNotDuplicatePaymentOrSuccessAudit() {
+    @Test void preUpgradeRejectedReceiptStillRetriesWithoutNewDatabaseObligation() throws Exception {
+        PaymentJournal journal = new PaymentJournal(folder.resolve("payments")); UUID id = UUID.randomUUID();
+        journal.begin(id, sellerId, buyerId, "sale", Map.of("source", id.toString(), "item", "payment:" + id));
+        journal.attempt(id, "credit", sellerId, 50, true, () -> false);
         when(vault.deposit(seller, 50)).thenReturn(true);
-        UUID id = PendingPayments.key("sale", listingId.toString());
-        assertTrue(payments.credit(id, sellerId, 50, "sale", buyerId));
-        assertTrue(payments.credit(id, sellerId, 50, "sale", buyerId));
-        verify(vault).deposit(seller, 50);
-        verify(guard).report(any(), any(), eq("sale"), eq(50d), eq(true), any(), any(), any());
+        db.close(); open(); service.retryPayments(); service.retryPayments(); service.recover();
+        verify(vault).deposit(seller, 50); verify(vault, never()).withdraw(any(), anyDouble());
+        assertTrue(journal.pending().isEmpty()); assertTrue(db.transactions().pending(50).isEmpty());
+    }
+    @Test void preUpgradeUnknownReceiptIsRetainedWithoutReplay() throws Exception {
+        PaymentJournal journal = new PaymentJournal(folder.resolve("payments")); UUID id = UUID.randomUUID();
+        journal.begin(id, sellerId, buyerId, "sale");
+        assertThrows(IllegalStateException.class, () -> journal.attempt(id, "credit", sellerId, 50, true, () -> { throw new IllegalStateException("unknown"); }));
+        db.close(); open(); service.retryPayments(); service.recover();
+        verifyNoInteractions(vault); assertEquals("IN_FLIGHT", journal.read(id).getProperty("leg.credit.status"));
     }
 }

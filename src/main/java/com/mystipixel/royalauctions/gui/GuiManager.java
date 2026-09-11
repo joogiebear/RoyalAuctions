@@ -221,13 +221,14 @@ public final class GuiManager {
         double price = s.price();
         ListingType type = s.type();
         long durationMillis = config.durationMillisFor(s.durationHours());
-        service.createListing(player, item, price, type, durationMillis, listed -> {
+        s.busy(true);
+        service.createListing(player, s.collectionId(), item, price, type, durationMillis, listed -> {
+            s.busy(false);
+            if (createSessions.get(uuid) != s) return;
             if (listed) {
                 createSessions.remove(uuid);
-                openListings(player);
-            } else {
-                openCreate(player);
-            }
+                if (player.isOnline()) openListings(player);
+            } else if (player.isOnline()) openCreate(player);
         });
     }
 
@@ -236,39 +237,31 @@ public final class GuiManager {
         openBrowse(player);
     }
 
-    /**
-     * Shutdown drain: any item still escrowed in a create-flow goes to its owner's collection so they
-     * can claim it back. Without this, an item deposited into the sell menu exists only in this map and
-     * is destroyed by a restart — the one place the create flow could lose real player property.
-     * Runs synchronously during disable (the scheduler is already gone), and returns how many it saved.
-     */
-    public int drainEscrowToCollection() {
-        int saved = 0;
-        for (Map.Entry<UUID, CreateSession> entry : createSessions.entrySet()) {
-            CreateSession session = entry.getValue();
-            if (session == null || !session.hasItem()) {
-                continue;
-            }
-            try {
-                service.escrowToCollection(entry.getKey(), session.item());
-                saved++;
-            } catch (Exception e) {
-                plugin.getLogger().log(java.util.logging.Level.SEVERE,
-                        "Could not return escrowed auction item for " + entry.getKey(), e);
-            }
-        }
-        createSessions.clear();
-        return saved;
-    }
+    /** All create items are already journalled in collection; shutdown never copies them again. */
+    public void clearCreateSessions() { createSessions.clear(); }
 
+    public void captureCreateItem(Player player, int slot, ItemStack expected) {
+        CreateSession s = createSessions.get(player.getUniqueId());
+        if (s == null || s.busy() || s.hasItem()) return;
+        s.busy(true);
+        service.capture(player, slot, expected, id -> {
+            s.busy(false);
+            if (createSessions.get(player.getUniqueId()) != s) return; // Stored in collection on close/quit.
+            if (id != null) { s.collectionId(id); s.item(expected); }
+            if (player.isOnline()) openCreate(player);
+        });
+    }
+    public void removeCreateItem(Player player) {
+        CreateSession s = createSessions.get(player.getUniqueId());
+        if (s == null || s.busy() || s.collectionId() == null) return;
+        UUID id = s.collectionId();
+        s.collectionId(null); s.item(null);
+        service.claimById(player, id, () -> { if (player.isOnline()) openCreate(player); });
+    }
     public void endCreateSession(Player player, boolean refund) {
         CreateSession s = createSessions.remove(player.getUniqueId());
-        if (s == null) {
-            return;
-        }
-        if (refund && s.hasItem()) {
-            service.returnItem(player, s.item());
-            messages.send(player, "create.cancelled");
+        if (s != null && refund && s.collectionId() != null && !s.busy() && player.isOnline()) {
+            service.claimById(player, s.collectionId(), () -> {});
         }
     }
 
@@ -327,10 +320,8 @@ public final class GuiManager {
     // ------------------------------------------------------------------ housekeeping
 
     public void handleQuit(Player player) {
-        CreateSession s = createSessions.remove(player.getUniqueId());
-        if (s != null && s.hasItem()) {
-            service.returnItem(player, s.item());
-        }
+        // Persisted collection and pending operations survive the session. No offline inventory edits.
+        createSessions.remove(player.getUniqueId());
     }
 
     /** Parse a positive amount, accepting k/m/b/t shorthand (e.g. "5k", "50m", "1.5b") and commas. */

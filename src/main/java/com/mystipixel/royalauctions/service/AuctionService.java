@@ -2,14 +2,7 @@ package com.mystipixel.royalauctions.service;
 
 import com.mystipixel.royalauctions.category.CategoryManager;
 import com.mystipixel.royalauctions.config.PluginConfig;
-import com.mystipixel.royalauctions.data.AuctionDatabase;
-import com.mystipixel.royalauctions.data.CollectionItem;
-import com.mystipixel.royalauctions.data.ItemSerialization;
-import com.mystipixel.royalauctions.data.Listing;
-import com.mystipixel.royalauctions.data.ListingQuery;
-import com.mystipixel.royalauctions.data.ListingPage;
-import com.mystipixel.royalauctions.data.ListingStatus;
-import com.mystipixel.royalauctions.data.ListingType;
+import com.mystipixel.royalauctions.data.*;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
 import com.mystipixel.royalauctions.util.Text;
@@ -18,437 +11,197 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
-/**
- * All auction business logic. DB work runs off the main thread; anything touching the
- * Bukkit world or the Vault economy is hopped back onto the main thread. Items are moved
- * into "escrow" (removed from the player) before any async work so nothing can be duped.
- */
+/** Auction changes use durable database reservations; all inventory/Vault effects run on main. */
 public final class AuctionService {
-
-    private final PendingPayments payments;
     private final JavaPlugin plugin;
     private final AuctionDatabase db;
+    private final AuctionTransactions transactions;
     private final VaultHook vault;
     private final PluginConfig config;
     private final CategoryManager categories;
     private final com.mystipixel.royalauctions.tier.TierManager tiers;
     private final MessageManager messages;
     private final com.mystipixel.royalauctions.hooks.EconGuardHook econGuard;
+    private final String worker = UUID.randomUUID().toString();
+    private final ExternalEffectRunner effects;
+    private final PendingPayments legacyPayments;
+    private final AtomicBoolean recovering = new AtomicBoolean();
+    private long lastRecoveryWarning;
+    private volatile int activeCache;
+    private Consumer<UUID> eventReady = id -> {};
 
-    /** Cheap cached count for placeholders; refreshed by the expiry sweep and on demand. */
-    private volatile int activeCache = 0;
+    public void eventNotifier(Consumer<UUID> notifier) { this.eventReady = notifier; }
+    /** Main-thread compatibility worker for file receipts created before the database journal. */
+    public void retryPayments() { legacyPayments.retryRejected(); }
 
     public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
                           CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
                           MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard) {
-        this(plugin, db, vault, config, categories, tiers, messages, econGuard,
-                new PendingPayments(new com.mystipixel.royalauctions.data.PaymentJournal(
-                        plugin.getDataFolder().toPath().resolve("payments")), vault, econGuard, plugin.getLogger()));
+        this.plugin = plugin; this.db = db; this.transactions = db.transactions(); this.vault = vault;
+        this.config = config; this.categories = categories; this.tiers = tiers;
+        this.messages = messages; this.econGuard = econGuard;
+        // New exchanges use the database journal; old file receipts retain their original IDs.
+        legacyPayments = new PendingPayments(new PaymentJournal(plugin.getDataFolder().toPath().resolve("payments")),
+                vault, econGuard, plugin.getLogger());
+        effects = new ExternalEffectRunner(transactions, this::async, this::sync, worker,
+                e -> logError("processing an external effect; check /ah recovery", e));
+        plugin.getLogger().info("Auction recovery worker: " + worker);
+    }
+    private void async(Runnable r) { if (plugin.isEnabled()) Bukkit.getScheduler().runTaskAsynchronously(plugin, r); }
+    private void sync(Runnable r) { if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, r); }
+    private void logError(String what, Throwable e) { plugin.getLogger().log(Level.SEVERE, "Error " + what, e); }
+    private void tell(Player player, String key, String... values) { if (player.isOnline()) messages.send(player, key, values); }
+    private void failure(Player player, Exception e) {
+        if (e instanceof AuctionTransactions.Rejected) tell(player, "exchange.rejected", "reason", e.getMessage());
+        else { logError("reserving an auction operation", e); tell(player, "exchange.unconfirmed"); }
+    }
+    private void result(Player player, UUID operation, ExternalEffectRunner.Result result) {
+        if (result == ExternalEffectRunner.Result.PENDING)
+            tell(player, "exchange.pending", "operation", operation.toString());
+        else if (result == ExternalEffectRunner.Result.DECLINED)
+            tell(player, "exchange.declined");
+    }
+    private boolean debit(Player player, double amount) {
+        return player.isOnline() && (amount == 0 || vault.withdraw(player, amount));
     }
 
-    public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
-                          CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
-                          MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard,
-                          PendingPayments payments) {
-        this.payments = payments;
-        this.plugin = plugin;
-        this.db = db;
-        this.vault = vault;
-        this.config = config;
-        this.categories = categories;
-        this.tiers = tiers;
-        this.messages = messages;
-        this.econGuard = econGuard;
-    }
-
-    public void retryPayments() { payments.retryRejected(); }
-
-    private boolean credit(String source, UUID recipient, double amount, String action, UUID counterparty, String itemName) {
-        boolean paid = payments.credit(PendingPayments.key(action, source), recipient, amount, action, counterparty, source, itemName);
-        if (!paid) {
-            Player online = Bukkit.getPlayer(recipient);
-            if (online != null) messages.send(online, "payment-pending");
-        }
-        return paid;
-    }
-
-    // ------------------------------------------------------------------ scheduling helpers
-
-    private void async(Runnable r) {
-        if (plugin.isEnabled()) {
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, r);
-        }
-    }
-
-    private void sync(Runnable r) {
-        if (plugin.isEnabled()) {
-            Bukkit.getScheduler().runTask(plugin, r);
-        }
-    }
-
-    private void logError(String what, Throwable t) {
-        plugin.getLogger().log(Level.SEVERE, "Database error while " + what, t);
-    }
-
-    /**
-     * Queue an event for a player who was not online to watch it happen — sold, outbid, won,
-     * expired. Their next join replays the queue as a short summary (see OfflineEventNotifier),
-     * because money that moves silently while you're away reads as either a bug or a theft.
-     */
-    private void recordOffline(UUID player, String type, String item, double amount) {
-        if (player == null) {
-            return;
-        }
-        long now = System.currentTimeMillis();
+    public void placeBid(Player bidder, Listing shown, double amount, Runnable onDone) {
+        UUID player = bidder.getUniqueId(); String name = bidder.getName();
         async(() -> {
             try {
-                db.addEvent(player, type, item, amount, now);
-            } catch (Exception e) {
-                logError("recording an offline event", e);
-            }
-        });
-    }
-
-    // ------------------------------------------------------------------ listing (selling)
-
-    /**
-     * Create a listing from the GUI create-flow. The item is already held in the create session
-     * (escrow), so this never touches the player's inventory. {@code onResult} receives {@code true}
-     * only if the listing was stored (item consumed); {@code false} leaves the item in the session
-     * so the caller can reopen the create screen for the player to adjust.
-     */
-    public void createListing(Player seller, ItemStack item, double price, ListingType type,
-                              long durationMillis, Consumer<Boolean> onResult) {
-        if (item == null || item.getType().isAir()) {
-            onResult.accept(false);
-            return;
-        }
-        // Refuse the listing before anything is charged or withdrawn. The check reuses the browse
-        // categoriser rather than carrying its own material list, so what an item *is* is decided in
-        // exactly one place — the category a buyer browses under and the rule that let it be sold
-        // can never drift apart.
-        String sellCategory = categories.categorize(item);
-        if (!config.canSellCategory(sellCategory)) {
-            messages.send(seller, "sell.category-not-allowed", "category", sellCategory);
-            onResult.accept(false);
-            return;
-        }
-        if (price < config.minPrice()) {
-            messages.send(seller, "sell.min-price", "min", vault.format(config.minPrice()));
-            onResult.accept(false);
-            return;
-        }
-        if (config.hasMaxPrice() && price > config.maxPrice()) {
-            messages.send(seller, "sell.max-price", "max", vault.format(config.maxPrice()));
-            onResult.accept(false);
-            return;
-        }
-
-        UUID sellerId = seller.getUniqueId();
-        async(() -> {
-            int count;
-            try {
-                count = db.countActiveBySeller(sellerId);
-            } catch (Exception e) {
-                logError("counting listings", e);
-                sync(() -> onResult.accept(false));
-                return;
-            }
-            sync(() -> finishListing(seller, item, price, type, durationMillis, count, onResult));
-        });
-    }
-
-    private void finishListing(Player seller, ItemStack item, double price, ListingType type,
-                               long durationMillis, int currentCount, Consumer<Boolean> onResult) {
-        int limit = config.maxPerPlayer();
-        boolean unlimited = limit < 0 || seller.hasPermission("royalauctions.admin");
-        if (!unlimited && currentCount >= limit) {
-            messages.send(seller, "sell.too-many", "max", String.valueOf(limit));
-            onResult.accept(false);
-            return;
-        }
-
-        double fee = config.feeFor(price);
-        if (!vault.has(seller, fee) || !vault.withdraw(seller, fee)) {
-            messages.send(seller, "sell.cannot-afford-fee", "fee", vault.format(fee));
-            onResult.accept(false);
-            return;
-        }
-
-        String category = categories.categorize(item);
-        String tier = tiers.tierOf(item); // resolved once, at creation — browsing never recomputes it
-        String displayName = displayNameOf(item);
-        long now = System.currentTimeMillis();
-        Listing listing = new Listing(UUID.randomUUID(), seller.getUniqueId(), seller.getName(),
-                ItemSerialization.serialize(item), displayName, category, tier, type, price,
-                now, now + durationMillis, ListingStatus.ACTIVE, 0, null, null, 0);
-
-        async(() -> {
-            try {
-                db.insertListing(listing);
-                sync(() -> {
-                    messages.send(seller, "sell.success",
-                            "item", displayName, "price", vault.format(price), "fee", vault.format(fee));
-                    onResult.accept(true);
-                });
-            } catch (Exception e) {
-                logError("inserting listing", e);
-                sync(() -> {
-                    credit(listing.id().toString(), seller.getUniqueId(), fee, "listing-fee-refund", null, listing.displayName());
-                    onResult.accept(false);
-                });
-            }
-        });
-    }
-
-    // ------------------------------------------------------------------ bidding
-
-    public void placeBid(Player bidder, Listing listing, double amount, Runnable onDone) {
-        if (!listing.isAuction()) {
-            return;
-        }
-        if (bidder.getUniqueId().equals(listing.sellerId())) {
-            messages.send(bidder, "bid.own-listing");
-            return;
-        }
-        double minNext = listing.nextMinBid(config.bidIncrementFor(listing.currentBid()));
-        if (amount < minNext) {
-            messages.send(bidder, "bid.too-low", "min", vault.format(minNext));
-            return;
-        }
-        if (!vault.has(bidder, amount)) {
-            messages.send(bidder, "bid.cannot-afford", "amount", vault.format(amount));
-            return;
-        }
-
-        UUID bidderId = bidder.getUniqueId();
-        String bidderName = bidder.getName();
-        async(() -> {
-            com.mystipixel.royalauctions.data.AuctionDatabase.BidOutcome outcome;
-            try {
-                outcome = db.placeBid(listing.id(), bidderId, bidderName, amount, config.antiSnipeMillis());
-            } catch (Exception e) {
-                logError("placing bid", e);
-                sync(onDone);
-                return;
-            }
-            sync(() -> completeBid(bidder, listing, amount, outcome, onDone));
-        });
-    }
-
-    private void completeBid(Player bidder, Listing listing, double amount,
-                             com.mystipixel.royalauctions.data.AuctionDatabase.BidOutcome outcome, Runnable onDone) {
-        if (!outcome.success) {
-            messages.send(bidder, "OUTBID".equals(outcome.failureReason) ? "bid.outbid-already" : "bid.gone");
-            onDone.run();
-            return;
-        }
-        if (!vault.withdraw(bidder, amount)) {
-            async(() -> {
-                try {
-                    db.revertBid(listing.id(), bidder.getUniqueId(),
-                            outcome.previousBidderId, outcome.previousBidderName, outcome.previousBid);
-                } catch (Exception e) {
-                    logError("reverting bid", e);
-                }
-            });
-            messages.send(bidder, "bid.cannot-afford", "amount", vault.format(amount));
-            onDone.run();
-            return;
-        }
-
-        // Report the bid's escrow debit to EconGuard (counterparty = seller) so bid velocity and
-        // buyer<->seller links are visible to the central abuse analysis.
-        econGuard.report(bidder.getUniqueId(), bidder.getName(), "bid", amount, false,
-                listing.sellerId(), listing.sellerName(), listing.displayName());
-
-        // Refund whoever we just outbid.
-        if (outcome.previousBidderId != null) {
-            boolean refunded = credit(listing.id() + ":" + outcome.previousBidderId + ":"
-                    + Double.toHexString(outcome.previousBid), outcome.previousBidderId,
-                    outcome.previousBid, "bid-refund", null, listing.displayName());
-            Player prevOnline = Bukkit.getPlayer(outcome.previousBidderId);
-            if (refunded && prevOnline != null) {
-                messages.send(prevOnline, "bid.you-were-outbid",
-                        "item", listing.displayName(), "amount", vault.format(outcome.previousBid));
-            } else if (refunded) {
-                recordOffline(outcome.previousBidderId, com.mystipixel.royalauctions.data.OfflineEvent.OUTBID,
-                        listing.displayName(), outcome.previousBid);
-            }
-        }
-
-        Player seller = Bukkit.getPlayer(listing.sellerId());
-        if (seller != null) {
-            messages.send(seller, "bid.new-bid-seller",
-                    "item", listing.displayName(), "amount", vault.format(amount), "bidder", bidder.getName());
-        }
-        messages.send(bidder, "bid.placed", "item", listing.displayName(), "amount", vault.format(amount));
-        if (outcome.extended) {
-            long seconds = Math.max(1, (outcome.expiresAt - System.currentTimeMillis()) / 1000L);
-            messages.send(bidder, "bid.extended", "seconds", String.valueOf(seconds));
-        }
-        onDone.run();
-    }
-
-    // ------------------------------------------------------------------ buying
-
-    public void purchase(Player buyer, Listing listing, Runnable onDone) {
-        if (buyer.getUniqueId().equals(listing.sellerId())) {
-            messages.send(buyer, "buy.own-listing");
-            return;
-        }
-        double price = listing.price();
-        if (!vault.has(buyer, price)) {
-            messages.send(buyer, "buy.cannot-afford", "price", vault.format(price));
-            return;
-        }
-
-        UUID buyerId = buyer.getUniqueId();
-        long now = System.currentTimeMillis();
-        async(() -> {
-            boolean reserved;
-            try {
-                reserved = db.markSoldIfActive(listing.id(), buyerId, now);
-            } catch (Exception e) {
-                logError("reserving listing", e);
-                return;
-            }
-            if (!reserved) {
-                sync(() -> {
-                    messages.send(buyer, "buy.gone");
-                    onDone.run();
-                });
-                return;
-            }
-            sync(() -> completePurchase(buyer, listing, price, onDone));
-        });
-    }
-
-    private void completePurchase(Player buyer, Listing listing, double price, Runnable onDone) {
-        if (!vault.withdraw(buyer, price)) {
-            // Buyer's balance changed between the affordability check and now; release the listing.
-            async(() -> {
-                try {
-                    db.revertSold(listing.id(), buyer.getUniqueId());
-                } catch (Exception e) {
-                    logError("reverting sold listing", e);
-                }
-            });
-            messages.send(buyer, "buy.cannot-afford", "price", vault.format(price));
-            onDone.run();
-            return;
-        }
-
-        boolean sellerPaid = credit(listing.id().toString(), listing.sellerId(), price, "sale", buyer.getUniqueId(), listing.displayName());
-
-        // Both legs of the sale to EconGuard, each naming the other party for RMT / collusion analysis.
-        econGuard.report(buyer.getUniqueId(), buyer.getName(), "buy", price, false,
-                listing.sellerId(), listing.sellerName(), listing.displayName());
-
-        ItemStack item = listing.item();
-        String display = listing.displayName();
-        boolean toCollection = !config.instantDeliver();
-        if (!toCollection) {
-            Map<Integer, ItemStack> leftover = buyer.getInventory().addItem(item);
-            if (leftover.isEmpty()) {
-                messages.send(buyer, "buy.success", "item", display, "price", vault.format(price));
-            } else {
-                for (ItemStack rest : leftover.values()) {
-                    storeCollection(buyer.getUniqueId(), rest, CollectionItem.Reason.PURCHASE);
-                }
-                messages.send(buyer, "buy.inventory-full-collection");
-            }
-        } else {
-            storeCollection(buyer.getUniqueId(), item, CollectionItem.Reason.PURCHASE);
-            messages.send(buyer, "buy.success", "item", display, "price", vault.format(price));
-        }
-
-        Player onlineSeller = Bukkit.getPlayer(listing.sellerId());
-        if (sellerPaid && onlineSeller != null) {
-            messages.send(onlineSeller, "buy.sold-notify",
-                    "buyer", buyer.getName(), "item", display, "price", vault.format(price));
-        } else if (sellerPaid) {
-            recordOffline(listing.sellerId(), com.mystipixel.royalauctions.data.OfflineEvent.SOLD,
-                    display, price);
-        }
-        onDone.run();
-    }
-
-    // ------------------------------------------------------------------ cancelling
-
-    public void cancelListing(Player seller, Listing listing, Runnable onDone) {
-        if (!seller.getUniqueId().equals(listing.sellerId())) {
-            messages.send(seller, "cancel.not-yours");
-            return;
-        }
-        UUID sellerId = seller.getUniqueId();
-        async(() -> {
-            boolean ok;
-            try {
-                ok = db.cancelIfActive(listing.id(), sellerId);
-            } catch (Exception e) {
-                logError("cancelling listing", e);
-                return;
-            }
-            if (!ok) {
-                sync(() -> {
-                    messages.send(seller, "cancel.gone");
-                    onDone.run();
-                });
-                return;
-            }
-            try {
-                db.addCollectionItem(new CollectionItem(UUID.randomUUID(), sellerId,
-                        listing.itemData(), CollectionItem.Reason.CANCELLED, System.currentTimeMillis()));
-            } catch (Exception e) {
-                logError("returning cancelled item", e);
-            }
-            sync(() -> {
-                messages.send(seller, "cancel.success");
-                onDone.run();
-            });
-        });
-    }
-
-    // ------------------------------------------------------------------ collection claiming
-
-    public void claim(Player player, CollectionItem ci, Runnable onDone) {
-        UUID ownerId = player.getUniqueId();
-        async(() -> {
-            boolean removed;
-            try {
-                removed = db.removeCollectionItem(ci.id(), ownerId);
-            } catch (Exception e) {
-                logError("claiming collection item", e);
-                return;
-            }
-            if (!removed) {
-                sync(onDone);
-                return;
-            }
-            sync(() -> {
-                ItemStack item = ci.item();
-                Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
-                if (!leftover.isEmpty()) {
-                    // No room — put it back so it is never lost.
-                    for (ItemStack rest : leftover.values()) {
-                        storeCollection(ownerId, rest, ci.reason());
+                var reserved = transactions.reserveBid(shown.id(), player, name, amount, config::bidIncrementFor, config.antiSnipeMillis(), worker);
+                effects.execute(reserved.operation().id(), () -> debit(bidder, amount), outcome -> {
+                    result(bidder, reserved.operation().id(), outcome);
+                    if (outcome == ExternalEffectRunner.Result.COMPLETED) {
+                        Listing l = reserved.listing();
+                        messages.send(bidder, "bid.placed", "item", l.displayName(), "amount", vault.format(amount));
+                        if (reserved.operation().expiry() > l.expiresAt())
+                            messages.send(bidder, "bid.extended", "seconds", String.valueOf(Math.max(1, (reserved.operation().expiry() - System.currentTimeMillis()) / 1000)));
+                        econGuard.report(player, name, "bid", amount, false, l.sellerId(), l.sellerName(), l.displayName());
+                        Player seller = Bukkit.getPlayer(l.sellerId());
+                        if (seller != null) messages.send(seller, "bid.new-bid-seller", "item", l.displayName(), "amount", vault.format(amount), "bidder", name);
                     }
-                    messages.send(player, "collection.full-inventory");
-                } else {
-                    messages.send(player, "collection.claimed", "item", displayNameOf(item));
-                }
-                onDone.run();
-            });
+                    if (bidder.isOnline()) onDone.run();
+                });
+            } catch (Exception e) { sync(() -> { failure(bidder, e); if (bidder.isOnline()) onDone.run(); }); }
         });
+    }
+
+    public void purchase(Player buyer, Listing shown, Runnable onDone) {
+        UUID player = buyer.getUniqueId(); String name = buyer.getName();
+        async(() -> {
+            try {
+                var reserved = transactions.reserveBuy(shown.id(), player, name, shown.price(), worker);
+                effects.execute(reserved.operation().id(), () -> debit(buyer, reserved.operation().amount()), outcome -> {
+                    result(buyer, reserved.operation().id(), outcome);
+                    if (outcome == ExternalEffectRunner.Result.COMPLETED) {
+                        Listing l = reserved.listing();
+                        econGuard.report(player, name, "buy", l.price(), false, l.sellerId(), l.sellerName(), l.displayName());
+                        tell(buyer, "exchange.purchased");
+                        if (config.instantDeliver() && buyer.isOnline())
+                            claimById(buyer, settlementId(l.id()), () -> { if (buyer.isOnline()) onDone.run(); });
+                        else if (buyer.isOnline()) onDone.run();
+                    } else if (buyer.isOnline()) onDone.run();
+                });
+            } catch (Exception e) { sync(() -> { failure(buyer, e); if (buyer.isOnline()) onDone.run(); }); }
+        });
+    }
+    private static UUID settlementId(UUID listing) {
+        return UUID.nameUUIDFromBytes(("settlement/" + listing).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    public void cancelListing(Player seller, Listing shown, Runnable onDone) {
+        UUID player = seller.getUniqueId();
+        async(() -> {
+            try { transactions.cancel(shown.id(), player); sync(() -> { messages.send(seller, "cancel.success"); if (seller.isOnline()) onDone.run(); }); }
+            catch (Exception e) { sync(() -> { failure(seller, e); if (seller.isOnline()) onDone.run(); }); }
+        });
+    }
+
+    /** Persist the item and intent before removing anything from the live inventory. */
+    public void capture(Player player, int slot, ItemStack expected, Consumer<UUID> completed) {
+        UUID owner = player.getUniqueId(); String name = player.getName();
+        byte[] bytes = ItemSerialization.serialize(expected);
+        async(() -> {
+            try {
+                var r = transactions.reserveCapture(owner, name, bytes, worker);
+                effects.execute(r.operation().id(), () -> {
+                    if (!player.isOnline() || !expected.equals(player.getInventory().getItem(slot))) return false;
+                    player.getInventory().setItem(slot, null);
+                    player.saveData();
+                    return true;
+                }, outcome -> {
+                    result(player, r.operation().id(), outcome);
+                    completed.accept(outcome == ExternalEffectRunner.Result.COMPLETED ? r.operation().collection() : null);
+                });
+            } catch (Exception e) { sync(() -> { failure(player, e); completed.accept(null); }); }
+        });
+    }
+
+    public void createListing(Player seller, UUID collection, ItemStack item, double price, ListingType type,
+                              long duration, Consumer<Boolean> completed) {
+        if (collection == null || !Double.isFinite(price) || price < config.minPrice()
+                || (config.hasMaxPrice() && price > config.maxPrice()) || duration <= 0) {
+            tell(seller, "exchange.invalid-listing"); completed.accept(false); return;
+        }
+        String category = categories.categorize(item);
+        if (!config.canSellCategory(category)) { messages.send(seller, "sell.category-not-allowed", "category", category); completed.accept(false); return; }
+        long now = System.currentTimeMillis();
+        Listing listing = new Listing(UUID.randomUUID(), seller.getUniqueId(), seller.getName(), ItemSerialization.serialize(item),
+                displayNameOf(item), category, tiers.tierOf(item), type, price, now, Math.addExact(now, duration), ListingStatus.DRAFT, 0, null, null, 0);
+        double fee = config.feeFor(price);
+        int limit = seller.hasPermission("royalauctions.admin") ? -1 : config.maxPerPlayer();
+        async(() -> {
+            try {
+                var reserved = transactions.reserveCreate(listing, collection, fee, limit, worker);
+                effects.execute(reserved.operation().id(), () -> debit(seller, fee), outcome -> {
+                    result(seller, reserved.operation().id(), outcome);
+                    if (outcome == ExternalEffectRunner.Result.COMPLETED)
+                        messages.send(seller, "sell.success", "item", listing.displayName(), "price", vault.format(price), "fee", vault.format(fee));
+                    // Even a pending operation retains the item in durable custody. The session is closed.
+                    completed.accept(outcome != ExternalEffectRunner.Result.DECLINED);
+                });
+            } catch (Exception e) { sync(() -> { failure(seller, e); completed.accept(false); }); }
+        });
+    }
+
+    public void claim(Player player, CollectionItem item, Runnable onDone) { claimById(player, item.id(), onDone); }
+    public void claimById(Player player, UUID id, Runnable onDone) {
+        UUID owner = player.getUniqueId(); String name = player.getName();
+        async(() -> {
+            try {
+                var r = transactions.reserveClaim(id, owner, name, worker);
+                effects.execute(r.operation().id(), () -> {
+                    if (!player.isOnline()) return false;
+                    ItemStack item = r.item().item();
+                    if (!hasRoom(player, item)) { messages.send(player, "collection.full-inventory"); return false; }
+                    // On the main thread, capacity cannot change between the check and the add.
+                    if (!player.getInventory().addItem(item).isEmpty())
+                        throw new IllegalStateException("Partial inventory delivery; reconcile " + r.operation().id());
+                    player.saveData();
+                    return true;
+                }, outcome -> {
+                    result(player, r.operation().id(), outcome);
+                    if (outcome == ExternalEffectRunner.Result.COMPLETED) messages.send(player, "collection.claimed", "item", displayNameOf(r.item().item()));
+                    if (player.isOnline()) onDone.run();
+                });
+            } catch (Exception e) { sync(() -> { failure(player, e); if (player.isOnline()) onDone.run(); }); }
+        });
+    }
+    static boolean hasRoom(Player player, ItemStack item) {
+        int remaining = item.getAmount();
+        int max = Math.min(item.getMaxStackSize(), player.getInventory().getMaxStackSize());
+        for (ItemStack slot : player.getInventory().getStorageContents()) {
+            if (slot == null || slot.getType().isAir()) remaining -= max;
+            else if (slot.isSimilar(item)) remaining -= Math.max(0, max - slot.getAmount());
+            if (remaining <= 0) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ loaders (async → main callback)
@@ -558,151 +311,93 @@ public final class AuctionService {
         });
     }
 
-    // ------------------------------------------------------------------ expiry sweep
-
-    /** A finished auction that needs the seller paid and the winner notified (done on the main thread). */
-    private record AuctionWin(UUID listingId, UUID sellerId, double amount, UUID winnerId, String winnerName, String itemName) {
-    }
 
     public void sweepExpired() {
-        long now = System.currentTimeMillis();
-        List<Listing> due;
         try {
-            due = db.dueExpirations(now);
-        } catch (Exception e) {
-            logError("scanning for expirations", e);
-            return;
-        }
-        Map<UUID, Integer> perSellerExpired = new HashMap<>();
-        List<AuctionWin> wins = new ArrayList<>();
-
-        for (Listing listing : due) {
-            try {
-                if (listing.type() == ListingType.AUCTION && listing.hasBids()) {
-                    // Auction with a winner: hand the item to the top bidder, pay the seller the bid.
-                    // Conditional on the bid count this sweep read: a bid committing between the read
-                    // and this flip would otherwise be charged while the stale leader got the item
-                    // and the payout. On a miss the next sweep finalises from the fresh row.
-                    if (db.markAuctionSoldIfUnchanged(listing.id(), listing.topBidderId(), now,
-                            listing.bidCount())) {
-                        db.addCollectionItem(new CollectionItem(UUID.randomUUID(), listing.topBidderId(),
-                                listing.itemData(), CollectionItem.Reason.PURCHASE, now));
-                        wins.add(new AuctionWin(listing.id(), listing.sellerId(), listing.currentBid(),
-                                listing.topBidderId(), listing.topBidderName(), listing.displayName()));
+            for (Listing l : db.dueExpirations(System.currentTimeMillis())) {
+                try {
+                    if (transactions.expire(l.id())) {
+                        Listing settled = db.getListing(l.id()).orElse(l);
+                        eventReady.accept(settled.status() == ListingStatus.SOLD && settled.topBidderId() != null
+                                ? settled.topBidderId() : settled.sellerId());
                     }
-                } else if (db.markExpiredIfActive(listing.id())) {
-                    // BIN or a bid-less auction: return the item to the seller.
-                    db.addCollectionItem(new CollectionItem(UUID.randomUUID(), listing.sellerId(),
-                            listing.itemData(), CollectionItem.Reason.EXPIRED, now));
-                    perSellerExpired.merge(listing.sellerId(), 1, Integer::sum);
                 }
-            } catch (Exception e) {
-                logError("finalising a listing", e);
+                catch (Exception e) { logError("settling auction " + l.id(), e); }
             }
-        }
-
-        if (!perSellerExpired.isEmpty() || !wins.isEmpty()) {
-            sync(() -> {
-                perSellerExpired.forEach((sellerId, count) -> {
-                    Player seller = Bukkit.getPlayer(sellerId);
-                    if (seller != null) {
-                        messages.send(seller, "expiry.expired-notify", "count", String.valueOf(count));
-                    } else {
-                        // amount carries the listing count for EXPIRED events, not money.
-                        recordOffline(sellerId, com.mystipixel.royalauctions.data.OfflineEvent.EXPIRED,
-                                null, count);
-                    }
-                });
-                for (AuctionWin win : wins) {
-                    boolean sellerPaid = credit(win.listingId().toString(), win.sellerId(), win.amount(),
-                            "auction-sale", win.winnerId(), win.itemName());
-                    // The winner's outflow was already reported when they bid; log the seller's payout,
-                    // naming the winner as counterparty so EconGuard can link the pair.
-                    Player seller = Bukkit.getPlayer(win.sellerId());
-                    if (sellerPaid && seller != null) {
-                        messages.send(seller, "auction.sold-seller",
-                                "item", win.itemName(), "amount", vault.format(win.amount()),
-                                "buyer", win.winnerName() == null ? "someone" : win.winnerName());
-                    } else if (sellerPaid) {
-                        recordOffline(win.sellerId(), com.mystipixel.royalauctions.data.OfflineEvent.SOLD,
-                                win.itemName(), win.amount());
-                    }
-                    Player winner = Bukkit.getPlayer(win.winnerId());
-                    if (winner != null) {
-                        messages.send(winner, "auction.won",
-                                "item", win.itemName(), "amount", vault.format(win.amount()));
-                    } else {
-                        recordOffline(win.winnerId(), com.mystipixel.royalauctions.data.OfflineEvent.WON,
-                                win.itemName(), win.amount());
-                    }
-                }
-            });
-        }
-
-        try {
             activeCache = db.countActive();
-        } catch (Exception e) {
-            logError("refreshing active count", e);
-        }
+        } catch (Exception e) { logError("settling expired auctions", e); }
     }
-
-    /** Refresh the cached active-listing count off-thread (used at startup). */
-    public void refreshActiveCount() {
-        async(() -> {
-            try {
-                activeCache = db.countActive();
-            } catch (Exception e) {
-                logError("refreshing active count", e);
+    /** Complete safe database-only work; retry only payouts confirmed not to have moved money. */
+    public void recover() {
+        if (!recovering.compareAndSet(false, true)) return;
+        try {
+            transactions.heartbeat(worker);
+            if (System.currentTimeMillis() - lastRecoveryWarning > 60_000) {
+                lastRecoveryWarning = System.currentTimeMillis();
+                int held = transactions.heldCount();
+                if (held > 0) plugin.getLogger().warning(held + " auction exchange(s) need review. Use /ah recovery; uncertain external effects are held, never automatically repeated.");
             }
-        });
-    }
-
-    public int activeCache() {
-        return activeCache;
-    }
-
-    // ------------------------------------------------------------------ helpers
-
-    /**
-     * Escrow an item into its owner's collection <em>on the calling thread</em>.
-     *
-     * <p>For the shutdown drain only. The normal {@link #storeCollection} path defers to the scheduler,
-     * which Bukkit refuses to run for a disabling plugin — the write would be dropped and the item
-     * destroyed. Throws so the caller can log a failure loudly rather than lose the item quietly.
-     */
-    public void escrowToCollection(UUID owner, ItemStack item) throws Exception {
-        db.addCollectionItem(new CollectionItem(UUID.randomUUID(), owner,
-                ItemSerialization.serialize(item), CollectionItem.Reason.CANCELLED,
-                System.currentTimeMillis()));
-    }
-
-    private void storeCollection(UUID owner, ItemStack item, CollectionItem.Reason reason) {
-        CollectionItem ci = new CollectionItem(UUID.randomUUID(), owner,
-                ItemSerialization.serialize(item), reason, System.currentTimeMillis());
-        async(() -> {
-            try {
-                db.addCollectionItem(ci);
-            } catch (Exception e) {
-                logError("storing collection item", e);
+            for (var o : transactions.recoverable(50)) {
+                try {
+                    switch (o.state()) {
+                        case APPLIED, FAILED -> {
+                            transactions.finish(o.id());
+                            if (o.kind() == AuctionTransactions.Kind.PAYOUT) eventReady.accept(o.player());
+                        }
+                        case PREPARED -> transactions.abandon(o.id());
+                        case READY -> {
+                            var context = transactions.paymentContext(o.listing());
+                            effects.execute(o.id(), () -> vault.deposit(Bukkit.getOfflinePlayer(o.player()), o.amount()), outcome -> {
+                                if (outcome == ExternalEffectRunner.Result.COMPLETED) {
+                                    eventReady.accept(o.player());
+                                    boolean refund = "OUTBID".equals(o.note());
+                                    UUID counterparty = refund ? null : context.buyer();
+                                    String counterpartyName = counterparty == null ? null : Bukkit.getOfflinePlayer(counterparty).getName();
+                                    econGuard.report(o.player(), o.playerName(), refund ? "bid-refund" : context.auction() ? "auction-sale" : "sale",
+                                            o.amount(), true, counterparty, counterpartyName, context.itemName());
+                                }
+                            });
+                        }
+                        default -> { }
+                    }
+                } catch (Exception e) { logError("recovering operation " + o.id(), e); }
             }
-        });
+        } catch (Exception e) { logError("reading recovery journal", e); }
+        finally { recovering.set(false); }
     }
-
-    /** Give an item back to a player, dropping any overflow at their feet. Main thread only. */
-    public void returnItem(Player player, ItemStack item) {
-        if (item == null || item.getType().isAir()) {
+    public void recoveryCommand(org.bukkit.command.CommandSender sender, String[] args) {
+        // Resolve only from console, with an explicit decision and confirmation. The store also
+        // refuses operations whose originating process is still heartbeating.
+        if (args.length > 1 && args[1].equalsIgnoreCase("resolve")) {
+            if (!(sender instanceof org.bukkit.command.ConsoleCommandSender) || args.length != 5
+                    || !Set.of("applied", "not-applied").contains(args[3]) || !args[4].equals("confirm")) {
+                sender.sendMessage("Console: /ah recovery resolve <operation-id> <applied|not-applied> confirm"); return;
+            }
+            UUID id;
+            try { id = UUID.fromString(args[2]); } catch (IllegalArgumentException e) { sender.sendMessage("Invalid operation ID."); return; }
+            async(() -> {
+                try { transactions.resolve(id, args[3].equals("applied"), sender.getName()); sync(() -> sender.sendMessage("Reconciled " + id)); }
+                catch (Exception e) { sync(() -> sender.sendMessage("Recovery refused: " + e.getMessage())); }
+            });
             return;
         }
-        Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
-        for (ItemStack rest : leftover.values()) {
-            player.getWorld().dropItemNaturally(player.getLocation(), rest);
-        }
+        int page;
+        try { page = args.length == 1 ? 1 : Integer.parseInt(args[1]); if (page < 1 || page > 1_000_000) throw new NumberFormatException(); }
+        catch (NumberFormatException e) { sender.sendMessage("Usage: /ah recovery [page] or /ah recovery resolve <id> <applied|not-applied> confirm"); return; }
+        async(() -> {
+            try {
+                List<String> lines = new ArrayList<>();
+                for (var o : transactions.pending(50, (page - 1) * 50)) lines.add(o.id() + " " + o.kind() + " " + o.state()
+                        + " player=" + o.player() + " amount=" + o.amount() + " listing=" + o.listing()
+                        + " collection=" + o.collection() + " origin=" + o.worker() + " updated=" + java.time.Instant.ofEpochMilli(o.updated()));
+                sync(() -> { sender.sendMessage("Pending auction operations, page " + page + " (up to 50): " + lines.size()); lines.forEach(sender::sendMessage); });
+            } catch (Exception e) { logError("listing recovery operations", e); }
+        });
     }
-
+    public void refreshActiveCount() { async(() -> { try { activeCache = db.countActive(); } catch (Exception e) { logError("counting auctions", e); } }); }
+    public int activeCache() { return activeCache; }
     private String displayNameOf(ItemStack item) {
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-            return Text.plain(item.getItemMeta().displayName());
-        }
+        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) return Text.plain(item.getItemMeta().displayName());
         String name = item.getType().name().toLowerCase().replace('_', ' ');
         return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
