@@ -1,3 +1,11 @@
+## 2026.37.0 — 2026-09-13
+
+### 🐛 Fixes
+- identify recovery workers in server startup logs (`10af515`)
+- journal auction exchanges and recover interrupted settlement (`0130b7b`)
+- retain unresolved payment settlements and prevent unsafe retries (`91a95a2`)
+- release at 10:00 Central or later, not exactly 10:00 (`639cfec`)
+
 ## 2026.36.0 — 2026-09-06
 
 ### ✨ Features
