@@ -21,6 +21,7 @@ public final class ConfirmPurchaseGui extends AuctionGui {
     private final String search;
     private final SortOrder sort;
     private final int page;
+    private boolean submitted;
 
     public ConfirmPurchaseGui(GuiManager manager, Listing listing, String category, String search,
                               SortOrder sort, int page) {
@@ -55,8 +56,13 @@ public final class ConfirmPurchaseGui extends AuctionGui {
         }
         Player player = (Player) event.getWhoClicked();
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
-            case CONFIRM_PURCHASE -> manager.service().purchase(player, listing,
-                    () -> manager.openBrowse(player, category, search, sort, page));
+            case CONFIRM_PURCHASE -> {
+                if (!submitted) {
+                    submitted = true;
+                    manager.service().purchase(player, listing,
+                            () -> manager.openBrowse(player, category, search, sort, page));
+                }
+            }
             case OPEN_BROWSE, CANCEL -> manager.openBrowse(player, category, search, sort, page);
             default -> {
                 // decorative
