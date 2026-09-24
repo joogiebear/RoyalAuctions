@@ -3,6 +3,7 @@ package com.mystipixel.royalauctions.service;
 import com.mystipixel.royalauctions.data.AuctionTransactions;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /** Separates durable intent, the main-thread effect, and its durable acknowledgement. */
@@ -14,11 +15,18 @@ public final class ExternalEffectRunner {
     private final Executor main;
     private final String worker;
     private final Consumer<Exception> errors;
+    private final BooleanSupplier closing;
 
     public ExternalEffectRunner(AuctionTransactions transactions, Executor database, Executor main,
                                 String worker, Consumer<Exception> errors) {
+        this(transactions, database, main, worker, errors, () -> false);
+    }
+
+    /** {@code closing}: once true, effects that have not started are declined instead of applied. */
+    public ExternalEffectRunner(AuctionTransactions transactions, Executor database, Executor main,
+                                String worker, Consumer<Exception> errors, BooleanSupplier closing) {
         this.transactions = transactions; this.database = database; this.main = main;
-        this.worker = worker; this.errors = errors;
+        this.worker = worker; this.errors = errors; this.closing = closing;
     }
 
     public void execute(UUID operation, Effect effect, Consumer<Result> callback) {
@@ -35,7 +43,9 @@ public final class ExternalEffectRunner {
             }
             main.execute(() -> {
                 final boolean applied;
-                try { applied = effect.apply(); }
+                // Shutting down: nothing has moved yet, so a durable "not applied" is the truth and
+                // lets the operation finish (or a payout return to READY) instead of being held.
+                try { applied = !closing.getAsBoolean() && effect.apply(); }
                 catch (Exception e) {
                     errors.accept(e);
                     callback.accept(Result.PENDING);

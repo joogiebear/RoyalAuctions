@@ -19,6 +19,12 @@ between an external effect and its database acknowledgement, its outcome is unkn
 RoyalAuctions holds that exchange and its reservation for review. It does **not** guess that
 the payment failed or run it again automatically.
 
+A normal stop or reload does not create held exchanges. Shutdown waits (up to ten seconds) for
+exchanges already under way: an effect that already ran is acknowledged, and one that has not
+started yet is recorded as not applied, so its reservation is released (a payout goes back to
+`READY` and is paid after the restart). Only a crash, a kill, or a provider that throws leaves an
+exchange `APPLYING`.
+
 | State | Meaning | Recovery |
 |---|---|---|
 | `PREPARED` | Saved intent; the external effect has not started | Abandon after two minutes; a late queued worker cannot start it |
