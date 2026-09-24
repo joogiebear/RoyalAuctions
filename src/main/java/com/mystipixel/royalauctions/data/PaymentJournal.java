@@ -104,6 +104,8 @@ public final class PaymentJournal {
         try {
             Files.move(pending.resolve(id + ".properties"), receipts.resolve(id + ".properties"),
                     StandardCopyOption.ATOMIC_MOVE);
+            syncDirectory(receipts);
+            syncDirectory(pending);
         } catch (IOException e) { throw new UncheckedIOException(e); }
     }
 
@@ -164,11 +166,26 @@ public final class PaymentJournal {
             }
             Files.move(temporary, pending.resolve(id + ".properties"),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            // The rename lives in the directory, not the file: without this a power loss could bring
+            // back the previous version (say, REJECTED instead of IN_FLIGHT) and pay a second time.
+            syncDirectory(pending);
         } catch (IOException e) { throw new UncheckedIOException(e); }
         finally {
             if (temporary != null) {
                 try { Files.deleteIfExists(temporary); } catch (IOException ignored) { /* harmless temp only */ }
             }
+        }
+    }
+
+    /**
+     * Flush a directory's entries to disk so a completed rename survives a crash. Some platforms
+     * (Windows) cannot open a directory for this; there the filesystem's own ordering is all we get.
+     */
+    private static void syncDirectory(Path directory) throws IOException {
+        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (IOException | UnsupportedOperationException e) {
+            if (!System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows")) throw e;
         }
     }
 }

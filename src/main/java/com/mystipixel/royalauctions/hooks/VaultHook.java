@@ -9,7 +9,8 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 /** Thin wrapper over the Vault economy. All calls are expected on the main thread. */
 public final class VaultHook {
 
-    private Economy economy;
+    // Swapped on the main thread when a higher-priority provider registers after startup.
+    private volatile Economy economy;
 
     public boolean setup() {
         if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
@@ -21,6 +22,12 @@ public final class VaultHook {
         }
         this.economy = rsp.getProvider();
         return economy != null;
+    }
+
+    /** The current provider's name, or null before one is found. */
+    public String providerName() {
+        Economy current = economy;
+        return current == null ? null : current.getName();
     }
 
     public boolean isReady() {

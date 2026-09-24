@@ -50,8 +50,9 @@ listings:
   default-duration-hours: 24
   # Default type a new listing opens as: BIN (buy-it-now) or AUCTION (bidding).
   default-type: BIN
-  # Maximum active listings a player may have at once (permission
-  # royalauctions.limit.<n> overrides this; -1 = unlimited).
+  # Maximum active listings a player may have at once (-1 = unlimited).
+  # The permission royalauctions.limit.<n> overrides this (the highest one a
+  # player has wins), and royalauctions.limit.unlimited removes the cap.
   max-per-player: 7
   # Price bounds (in Vault currency). max-price: -1 disables the upper bound.
   min-price: 1.0

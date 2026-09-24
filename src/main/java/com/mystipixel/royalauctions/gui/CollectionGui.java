@@ -21,6 +21,8 @@ public final class CollectionGui extends AuctionGui {
     private final List<CollectionItem> items;
     private final Map<Integer, CollectionItem> slotToItem = new HashMap<>();
     private int page;
+    /** One claim at a time; the menu reopens with fresh contents when it completes. */
+    private boolean claiming;
 
     public CollectionGui(GuiManager manager, Player player, List<CollectionItem> items) {
         this.manager = manager;
@@ -79,7 +81,10 @@ public final class CollectionGui extends AuctionGui {
         }
         int slot = event.getSlot();
         if (slotToItem.containsKey(slot)) {
-            manager.service().claim(player, slotToItem.get(slot), () -> manager.openCollection(player, page));
+            if (!claiming) {
+                claiming = true;
+                manager.service().claim(player, slotToItem.get(slot), () -> manager.openCollection(player, page));
+            }
             return;
         }
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
@@ -93,6 +98,7 @@ public final class CollectionGui extends AuctionGui {
                 page++;
                 render();
             }
+            case OPEN_HUB -> manager.openHub(player);
             case OPEN_BROWSE -> manager.openBrowse(player);
             case CLOSE -> player.closeInventory();
             default -> {

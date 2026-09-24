@@ -2,6 +2,7 @@ package com.mystipixel.royalauctions.message;
 
 import com.mystipixel.royalauctions.util.Text;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextReplacementConfig;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -10,9 +11,12 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /** Loads messages.yml and renders '&'-coloured, placeholder-filled chat components. */
 public final class MessageManager {
+
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z0-9_-]+)}");
 
     private final JavaPlugin plugin;
     private FileConfiguration messages;
@@ -45,16 +49,25 @@ public final class MessageManager {
         return value == null ? path : value;
     }
 
-    private String apply(String template, Map<String, String> placeholders) {
-        String result = template.replace("{prefix}", prefix);
-        for (Map.Entry<String, String> e : placeholders.entrySet()) {
-            result = result.replace("{" + e.getKey() + "}", e.getValue());
-        }
-        return result;
-    }
-
+    /**
+     * Colour the template first, then drop the values in as literal text. Values include things
+     * players control, such as an anvil-renamed item's name; substituted before colouring, a name
+     * like "&a[Staff] You won 1,000,000" would be rendered as formatting in other players' chat.
+     * One pass, so a value that itself contains "{amount}" is not substituted again. Values keep
+     * the colour of the text around their placeholder.
+     */
     public Component component(String path, Map<String, String> placeholders) {
-        return Text.chat(apply(raw(path), placeholders));
+        Component message = Text.chat(raw(path).replace("{prefix}", prefix));
+        if (placeholders.isEmpty()) {
+            return message;
+        }
+        return message.replaceText(TextReplacementConfig.builder()
+                .match(PLACEHOLDER)
+                .replacement((match, builder) -> {
+                    String value = placeholders.get(match.group(1));
+                    return builder.content(value == null ? match.group() : value);
+                })
+                .build());
     }
 
     public void send(CommandSender to, String path) {

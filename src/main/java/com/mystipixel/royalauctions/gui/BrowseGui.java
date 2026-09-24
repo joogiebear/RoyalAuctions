@@ -57,6 +57,8 @@ public final class BrowseGui extends AuctionGui {
     private String search;
     private SortOrder sort;
     private int page;
+    /** The page the slots currently show. {@code page} runs ahead of it while a fetch is in flight. */
+    private int shownPage;
 
     /** null = no tier filter (show all tiers). */
     private String tier;
@@ -126,6 +128,7 @@ public final class BrowseGui extends AuctionGui {
     }
 
     private void draw(ListingPage result, int perPage) {
+        shownPage = page;
         inventory.clear();
         slotToListing.clear();
         slotToCategory.clear();
@@ -310,10 +313,14 @@ public final class BrowseGui extends AuctionGui {
 
         if (slotToListing.containsKey(slot)) {
             Listing listing = slotToListing.get(slot);
+            if (listing.sellerId().equals(player.getUniqueId())) {
+                return; // can't buy/bid on your own; the tooltip already says so
+            }
+            // The slots show shownPage; page may already point at a fetch still in flight.
             if (listing.isAuction()) {
-                manager.openBid(player, listing, category, search, sort, page);
+                manager.openBid(player, listing, category, search, sort, shownPage);
             } else {
-                manager.openConfirm(player, listing, category, search, sort, page);
+                manager.openConfirm(player, listing, category, search, sort, shownPage);
             }
             return;
         }
@@ -360,14 +367,15 @@ public final class BrowseGui extends AuctionGui {
                 page = 0;
                 render();
             }
+            // Step from the page on screen, so spam-clicking cannot run ahead of the results.
             case PREV_PAGE -> {
-                if (page > 0) {
-                    page--;
+                if (shownPage > 0) {
+                    page = shownPage - 1;
                     render();
                 }
             }
             case NEXT_PAGE -> {
-                page++;
+                page = shownPage + 1;
                 render();
             }
             case OPEN_HUB -> manager.openHub(player);

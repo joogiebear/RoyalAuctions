@@ -25,6 +25,7 @@ public final class ConfirmCancelGui extends AuctionGui {
     private final Player player;
     private final Listing listing;
     private final int page;
+    private boolean submitted;
 
     public ConfirmCancelGui(GuiManager manager, Player player, Listing listing, int page) {
         this.manager = manager;
@@ -58,8 +59,12 @@ public final class ConfirmCancelGui extends AuctionGui {
             return;
         }
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
-            case CONFIRM_CANCEL -> manager.service().cancelListing(player, listing,
-                    () -> manager.openListings(player, page));
+            case CONFIRM_CANCEL -> {
+                if (!submitted) {
+                    submitted = true;
+                    manager.service().cancelListing(player, listing, () -> manager.openListings(player, page));
+                }
+            }
             case BACK, CANCEL, OPEN_MANAGE -> manager.openListings(player, page);
             case CLOSE -> player.closeInventory();
             default -> {

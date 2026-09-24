@@ -11,8 +11,12 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 /**
@@ -20,8 +24,10 @@ import java.util.logging.Level;
  * auctions, expired listings — as a short summary shortly after they join. Without this, money and
  * refunds move silently while they're away and items appear in the collection with no explanation.
  *
- * <p>Delivery is drain-then-send with a re-queue: events are read and deleted off-thread, and if the
- * player disconnected again before the main-thread send, they are written back rather than lost.
+ * <p>Delivery is read, send, then delete: events are read off-thread, shown on the main thread, and
+ * only then deleted by row id. A player who disconnects before the send, or a crash at any point,
+ * leaves the events queued for next time. One delivery per player runs at a time, so a join and a
+ * live notification arriving together cannot show the same events twice.
  * The delay after join is so the summary lands after the join-message noise, not inside it.
  */
 public final class OfflineEventNotifier implements Listener {
@@ -33,60 +39,78 @@ public final class OfflineEventNotifier implements Listener {
     private final AuctionDatabase db;
     private final MessageManager messages;
     private final VaultHook vault;
+    private final Workers workers;
+    private final Set<UUID> delivering = ConcurrentHashMap.newKeySet();
+    private final Set<UUID> again = ConcurrentHashMap.newKeySet();
 
-    public OfflineEventNotifier(JavaPlugin plugin, AuctionDatabase db, MessageManager messages, VaultHook vault) {
+    public OfflineEventNotifier(JavaPlugin plugin, AuctionDatabase db, MessageManager messages, VaultHook vault,
+                                Workers workers) {
         this.plugin = plugin;
         this.db = db;
         this.messages = messages;
         this.vault = vault;
+        this.workers = workers;
     }
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> deliver(id), DELAY_TICKS);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> start(id), DELAY_TICKS);
     }
 
     /** Trigger the same queue for an online recipient; leave offline players' notices untouched. */
     public void notifyOnline(UUID id) {
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        workers.sync(() -> {
             Player player = Bukkit.getPlayer(id);
-            if (player != null && player.isOnline())
-                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> deliver(id));
+            if (player != null && player.isOnline()) start(id);
         });
+    }
+
+    private void start(UUID id) {
+        if (workers.closing()) return;
+        if (!delivering.add(id)) {
+            again.add(id);                       // picked up when the running delivery finishes
+            return;
+        }
+        workers.async(() -> deliver(id));
     }
 
     private void deliver(UUID id) {
-        List<OfflineEvent> events;
+        Map<Long, OfflineEvent> events;
         try {
-            events = db.drainEvents(id);
+            events = db.peekEvents(id);
         } catch (Exception e) {
             plugin.getLogger().log(Level.WARNING, "Could not read offline auction events for " + id, e);
+            finish(id);
             return;
         }
         if (events.isEmpty()) {
+            finish(id);
             return;
         }
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        workers.sync(() -> {
             Player player = Bukkit.getPlayer(id);
             if (player == null || !player.isOnline()) {
-                requeue(id, events);             // bounced before delivery — keep the events
+                finish(id);                      // bounced before delivery — the events stay queued
                 return;
             }
-            send(player, events);
+            send(player, List.copyOf(events.values()));
+            List<Long> shown = new ArrayList<>(events.keySet());
+            workers.async(() -> {
+                try {
+                    db.deleteEvents(shown);
+                } catch (Exception e) {
+                    plugin.getLogger().log(Level.WARNING, "Could not clear delivered offline auction events", e);
+                } finally {
+                    finish(id);
+                }
+            });
         });
     }
 
-    private void requeue(UUID id, List<OfflineEvent> events) {
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            for (OfflineEvent event : events) {
-                try {
-                    db.addEvent(id, event.type(), event.item(), event.amount(), event.createdAt());
-                } catch (Exception e) {
-                    plugin.getLogger().log(Level.WARNING, "Could not re-queue an offline auction event", e);
-                }
-            }
-        });
+    private void finish(UUID id) {
+        delivering.remove(id);
+        if (again.remove(id)) start(id);
     }
 
     private void send(Player player, List<OfflineEvent> events) {

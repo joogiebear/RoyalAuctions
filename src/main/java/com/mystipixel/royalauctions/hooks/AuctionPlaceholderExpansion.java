@@ -49,7 +49,7 @@ public final class AuctionPlaceholderExpansion extends PlaceholderExpansion {
 
     @Override
     public String onRequest(OfflinePlayer player, @NotNull String params) {
-        return switch (params.toLowerCase()) {
+        return switch (params.toLowerCase(java.util.Locale.ROOT)) {
             case "active" -> String.valueOf(service.activeCache());
             case "max_listings" -> String.valueOf(config.maxPerPlayer());
             case "fee_percent" -> String.format("%.1f", config.feePercent() * 100);

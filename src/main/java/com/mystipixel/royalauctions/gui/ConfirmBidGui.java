@@ -30,6 +30,7 @@ public final class ConfirmBidGui extends AuctionGui {
     private final String search;
     private final SortOrder sort;
     private final int page;
+    private boolean submitted;
 
     public ConfirmBidGui(GuiManager manager, Player player, Listing listing, double amount,
                          String category, String search, SortOrder sort, int page) {
@@ -73,9 +74,14 @@ public final class ConfirmBidGui extends AuctionGui {
             return;
         }
         switch (MenuTemplate.actionOf(event.getCurrentItem())) {
-            case CONFIRM_BID -> manager.service().placeBid(player, listing, amount,
-                    () -> manager.openBrowse(player, category, search, sort, page));
-            case BACK, CANCEL -> manager.openBid(player, listing, category, search, sort, page);
+            case CONFIRM_BID -> {
+                if (!submitted) {
+                    submitted = true;
+                    manager.service().placeBid(player, listing, amount,
+                            () -> manager.openBrowse(player, category, search, sort, page));
+                }
+            }
+            case BACK, CANCEL -> manager.reopenBid(player, listing, category, search, sort, page);
             case OPEN_BROWSE -> manager.openBrowse(player, category, search, sort, page);
             case CLOSE -> player.closeInventory();
             default -> {

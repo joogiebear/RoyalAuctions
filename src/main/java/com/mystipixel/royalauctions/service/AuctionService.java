@@ -9,6 +9,7 @@ import com.mystipixel.royalauctions.util.Text;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.permissions.PermissionAttachmentInfo;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.*;
@@ -29,6 +30,7 @@ public final class AuctionService {
     private final com.mystipixel.royalauctions.hooks.EconGuardHook econGuard;
     private final String worker = UUID.randomUUID().toString();
     private final ExternalEffectRunner effects;
+    private final Workers workers;
     private final PendingPayments legacyPayments;
     private final AtomicBoolean recovering = new AtomicBoolean();
     private long lastRecoveryWarning;
@@ -41,19 +43,21 @@ public final class AuctionService {
 
     public AuctionService(JavaPlugin plugin, AuctionDatabase db, VaultHook vault, PluginConfig config,
                           CategoryManager categories, com.mystipixel.royalauctions.tier.TierManager tiers,
-                          MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard) {
+                          MessageManager messages, com.mystipixel.royalauctions.hooks.EconGuardHook econGuard,
+                          Workers workers) {
         this.plugin = plugin; this.db = db; this.transactions = db.transactions(); this.vault = vault;
         this.config = config; this.categories = categories; this.tiers = tiers;
-        this.messages = messages; this.econGuard = econGuard;
+        this.messages = messages; this.econGuard = econGuard; this.workers = workers;
         // New exchanges use the database journal; old file receipts retain their original IDs.
         legacyPayments = new PendingPayments(new PaymentJournal(plugin.getDataFolder().toPath().resolve("payments")),
                 vault, econGuard, plugin.getLogger());
-        effects = new ExternalEffectRunner(transactions, this::async, this::sync, worker,
-                e -> logError("processing an external effect; check /ah recovery", e));
+        effects = new ExternalEffectRunner(transactions, workers::async, workers::sync, worker,
+                e -> logError("processing an external effect; check /ah recovery", e), workers::closing);
         plugin.getLogger().info("Auction recovery worker: " + worker);
     }
-    private void async(Runnable r) { if (plugin.isEnabled()) Bukkit.getScheduler().runTaskAsynchronously(plugin, r); }
-    private void sync(Runnable r) { if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, r); }
+    /** Start new work. Refused once shutdown begins; work already under way still completes. */
+    private void async(Runnable r) { if (!workers.closing()) workers.async(r); }
+    private void sync(Runnable r) { workers.sync(r); }
     private void logError(String what, Throwable e) { plugin.getLogger().log(Level.SEVERE, "Error " + what, e); }
     private void tell(Player player, String key, String... values) { if (player.isOnline()) messages.send(player, key, values); }
     private void failure(Player player, Exception e) {
@@ -145,6 +149,10 @@ public final class AuctionService {
 
     public void createListing(Player seller, UUID collection, ItemStack item, double price, ListingType type,
                               long duration, Consumer<Boolean> completed) {
+        // The menus reach this too, not only /ah sell, so the permission is enforced here.
+        if (!seller.hasPermission("royalauctions.sell")) {
+            tell(seller, "general.no-permission"); completed.accept(false); return;
+        }
         if (collection == null || !Double.isFinite(price) || price < config.minPrice()
                 || (config.hasMaxPrice() && price > config.maxPrice()) || duration <= 0) {
             tell(seller, "exchange.invalid-listing"); completed.accept(false); return;
@@ -155,7 +163,7 @@ public final class AuctionService {
         Listing listing = new Listing(UUID.randomUUID(), seller.getUniqueId(), seller.getName(), ItemSerialization.serialize(item),
                 displayNameOf(item), category, tiers.tierOf(item), type, price, now, Math.addExact(now, duration), ListingStatus.DRAFT, 0, null, null, 0);
         double fee = config.feeFor(price);
-        int limit = seller.hasPermission("royalauctions.admin") ? -1 : config.maxPerPlayer();
+        int limit = listingLimit(seller);
         async(() -> {
             try {
                 var reserved = transactions.reserveCreate(listing, collection, fee, limit, worker);
@@ -168,6 +176,26 @@ public final class AuctionService {
                 });
             } catch (Exception e) { sync(() -> { failure(seller, e); completed.accept(false); }); }
         });
+    }
+
+    /**
+     * Active-listing cap for a seller: unlimited for admins, else the highest
+     * {@code royalauctions.limit.<n>} they hold ({@code royalauctions.limit.unlimited} lifts it),
+     * else {@code max-per-player}. Any negative result means unlimited.
+     */
+    public int listingLimit(Player seller) {
+        if (seller.hasPermission("royalauctions.admin")) return -1;
+        String prefix = "royalauctions.limit.";
+        int best = Integer.MIN_VALUE;
+        for (PermissionAttachmentInfo info : seller.getEffectivePermissions()) {
+            String permission = info.getPermission();
+            if (!info.getValue() || !permission.regionMatches(true, 0, prefix, 0, prefix.length())) continue;
+            String value = permission.substring(prefix.length());
+            if (value.equalsIgnoreCase("unlimited")) return -1;
+            try { best = Math.max(best, Integer.parseInt(value)); } catch (NumberFormatException ignored) { }
+        }
+        int limit = best == Integer.MIN_VALUE ? config.maxPerPlayer() : best;
+        return limit < 0 ? -1 : limit;
     }
 
     public void claim(Player player, CollectionItem item, Runnable onDone) { claimById(player, item.id(), onDone); }
@@ -224,8 +252,12 @@ public final class AuctionService {
         });
     }
 
-    /** One-off pass over every active listing at startup, repairing categories renamed in config. */
-    public void repairCategoriesOnStartup() {
+    /**
+     * Pass over every active listing, repairing categories renamed in config. Runs after startup
+     * (once eco has registered its items, so custom items are not filed by base material) and
+     * after each reload.
+     */
+    public void repairAllCategories() {
         async(() -> {
             try {
                 repairStaleCategories(db.activeListings());
@@ -274,6 +306,19 @@ public final class AuctionService {
         }
     }
 
+    /** A fresh copy of one listing, or empty if it no longer exists. */
+    public void loadListing(UUID id, Consumer<Optional<Listing>> callback) {
+        async(() -> {
+            try {
+                Optional<Listing> listing = db.getListing(id);
+                sync(() -> callback.accept(listing));
+            } catch (Exception e) {
+                logError("loading listing " + id, e);
+                sync(() -> callback.accept(Optional.empty()));
+            }
+        });
+    }
+
     public void loadSellerListings(UUID sellerId, Consumer<List<Listing>> callback) {
         async(() -> {
             try {
@@ -313,6 +358,7 @@ public final class AuctionService {
 
 
     public void sweepExpired() {
+        if (workers.closing()) return;
         try {
             for (Listing l : db.dueExpirations(System.currentTimeMillis())) {
                 try {
@@ -329,7 +375,7 @@ public final class AuctionService {
     }
     /** Complete safe database-only work; retry only payouts confirmed not to have moved money. */
     public void recover() {
-        if (!recovering.compareAndSet(false, true)) return;
+        if (workers.closing() || !recovering.compareAndSet(false, true)) return;
         try {
             transactions.heartbeat(worker);
             if (System.currentTimeMillis() - lastRecoveryWarning > 60_000) {
@@ -396,9 +442,16 @@ public final class AuctionService {
     }
     public void refreshActiveCount() { async(() -> { try { activeCache = db.countActive(); } catch (Exception e) { logError("counting auctions", e); } }); }
     public int activeCache() { return activeCache; }
+    /** Longest name the listings and events tables hold (VARCHAR(256); MySQL rejects longer). */
+    static final int MAX_NAME_LENGTH = 256;
+
     private String displayNameOf(ItemStack item) {
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) return Text.plain(item.getItemMeta().displayName());
-        String name = item.getType().name().toLowerCase().replace('_', ' ');
+        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) return truncate(Text.plain(item.getItemMeta().displayName()));
+        String name = item.getType().name().toLowerCase(Locale.ROOT).replace('_', ' ');
         return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+    static String truncate(String name) {
+        if (name.codePointCount(0, name.length()) <= MAX_NAME_LENGTH) return name;
+        return name.substring(0, name.offsetByCodePoints(0, MAX_NAME_LENGTH - 1)) + "…";
     }
 }

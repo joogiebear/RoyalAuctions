@@ -49,7 +49,7 @@ public final class AuctionDatabase {
     // ------------------------------------------------------------------ lifecycle
 
     public void init() throws SQLException {
-        String rawType = config.getString("type", "SQLITE").toUpperCase();
+        String rawType = config.getString("type", "SQLITE").toUpperCase(java.util.Locale.ROOT);
         this.type = "MYSQL".equals(rawType) ? Type.MYSQL : Type.SQLITE;
 
         HikariConfig hikari = new HikariConfig();
@@ -121,6 +121,7 @@ public final class AuctionDatabase {
                     + "item_data " + bigText() + " NOT NULL,"
                     + "display_name VARCHAR(256) NOT NULL,"
                     + "category VARCHAR(64) NOT NULL,"
+                    + "tier VARCHAR(32),"
                     + "type VARCHAR(16) NOT NULL DEFAULT 'BIN',"
                     + "price DOUBLE PRECISION NOT NULL,"
                     + "current_bid DOUBLE PRECISION,"
@@ -140,6 +141,10 @@ public final class AuctionDatabase {
             addColumn(st, "top_bidder_id", "CHAR(36)");
             addColumn(st, "top_bidder_name", "VARCHAR(32)");
             addColumn(st, "bid_count", "INT NOT NULL DEFAULT 0");
+            // Category and tier ids are compared exactly (so the browse filters can use an index);
+            // new rows are stored lowercase, and rows from older versions are brought in line here.
+            st.executeUpdate("UPDATE ra_listings SET category=LOWER(category) WHERE category<>LOWER(category)");
+            st.executeUpdate("UPDATE ra_listings SET tier=LOWER(tier) WHERE tier IS NOT NULL AND tier<>LOWER(tier)");
             st.executeUpdate("CREATE TABLE IF NOT EXISTS ra_collection ("
                     + "id CHAR(36) PRIMARY KEY,"
                     + "owner_id CHAR(36) NOT NULL,"
@@ -163,6 +168,8 @@ public final class AuctionDatabase {
             createIndex(st, "idx_ra_listings_status_created", "ra_listings(status, created_at)");
             createIndex(st, "idx_ra_listings_status_seller", "ra_listings(status, seller_id)");
             createIndex(st, "idx_ra_listings_status_expires", "ra_listings(status, expires_at)");
+            createIndex(st, "idx_ra_listings_status_category", "ra_listings(status, category)");
+            createIndex(st, "idx_ra_listings_status_tier", "ra_listings(status, tier)");
             createIndex(st, "idx_ra_collection_owner_created", "ra_collection(owner_id, created_at)");
             createIndex(st, "idx_ra_bids_bidder", "ra_bids(bidder_id)");
             createIndex(st, "idx_ra_bids_listing", "ra_bids(listing_id)");
@@ -182,22 +189,32 @@ public final class AuctionDatabase {
         return type == Type.MYSQL ? "BIGINT PRIMARY KEY AUTO_INCREMENT" : "INTEGER PRIMARY KEY AUTOINCREMENT";
     }
 
-    private void addColumn(Statement st, String column, String definition) {
+    private void addColumn(Statement st, String column, String definition) throws SQLException {
         // Ask the metadata whether the column exists, rather than ALTERing and swallowing the error.
         // Swallowing treats a genuinely-failed migration as "already there" — the schema ends up
         // missing the column while boot looks healthy, and every read then fails "column not found".
         // That exact trap cost RoyalSkyblock a live outage this week; don't repeat it here.
-        try {
-            try (ResultSet rs = st.getConnection().getMetaData().getColumns(null, null, "ra_listings", column)) {
-                if (rs.next()) {
+        //
+        // The lookup is scoped to this connection's database: a null catalog means "every database"
+        // to MySQL Connector/J, so another server's RoyalAuctions schema on the same MySQL instance
+        // would answer for ours. '_' is a wildcard in metadata patterns, so the rows are checked for
+        // an exact name. A failure is rethrown so startup stops instead of running on a
+        // half-migrated schema.
+        Connection c = st.getConnection();
+        try (ResultSet rs = c.getMetaData().getColumns(c.getCatalog(), null, "ra_listings", column)) {
+            while (rs.next()) {
+                if ("ra_listings".equalsIgnoreCase(rs.getString("TABLE_NAME"))
+                        && column.equalsIgnoreCase(rs.getString("COLUMN_NAME"))) {
                     return;                     // already present
                 }
             }
-            st.executeUpdate("ALTER TABLE ra_listings ADD COLUMN " + column + " " + definition);
-            logger.info("Migrated ra_listings: added column " + column + ".");
-        } catch (SQLException e) {
-            logger.severe("Migration failed: could not add ra_listings." + column + " — " + e.getMessage());
         }
+        try {
+            st.executeUpdate("ALTER TABLE ra_listings ADD COLUMN " + column + " " + definition);
+        } catch (SQLException e) {
+            throw new SQLException("Migration failed: could not add ra_listings." + column + " — " + e.getMessage(), e);
+        }
+        logger.info("Migrated ra_listings: added column " + column + ".");
     }
 
     private void createIndex(Statement st, String name, String target) {
@@ -241,8 +258,8 @@ public final class AuctionDatabase {
             ps.setString(3, l.sellerName());
             ps.setString(4, ItemSerialization.toBase64(l.itemData()));
             ps.setString(5, l.displayName());
-            ps.setString(6, l.category());
-            ps.setString(7, l.tier());
+            ps.setString(6, l.category() == null ? null : l.category().toLowerCase(Locale.ROOT));
+            ps.setString(7, l.tier() == null ? null : l.tier().toLowerCase(Locale.ROOT));
             ps.setString(8, l.type().name());
             ps.setDouble(9, l.price());
             ps.setDouble(10, l.currentBid());
@@ -315,14 +332,14 @@ public final class AuctionDatabase {
     /** WHERE clause for a browse, collecting its bind values into {@code params} in order. */
     private static String buildWhere(ListingQuery query, List<Object> params) {
         StringBuilder where = new StringBuilder("WHERE status='ACTIVE'");
+        // Category and tier ids are stored lowercase (see createSchema), so they are compared with
+        // a lowercased value directly: wrapping the column in LOWER() would defeat the index.
         if (query.category() != null) {
-            // Compared case-insensitively because category ids come from config, where casing may
-            // differ from what was stamped on the listing when it was created.
-            where.append(" AND LOWER(category) = ?");
+            where.append(" AND category = ?");
             params.add(query.category().toLowerCase(Locale.ROOT));
         }
         if (query.tier() != null) {
-            where.append(" AND LOWER(tier) = ?");
+            where.append(" AND tier = ?");
             params.add(query.tier().toLowerCase(Locale.ROOT));
         }
         if (query.type() != null) {
@@ -410,7 +427,7 @@ public final class AuctionDatabase {
     public void updateCategory(UUID id, String category) throws SQLException {
         String sql = "UPDATE ra_listings SET category=? WHERE id=?";
         try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, category);
+            ps.setString(1, category.toLowerCase(Locale.ROOT));
             ps.setString(2, id.toString());
             ps.executeUpdate();
         }
@@ -502,6 +519,43 @@ public final class AuctionDatabase {
             ps.setDouble(4, amount);
             ps.setLong(5, createdAt);
             ps.executeUpdate();
+        }
+    }
+
+    /**
+     * A player's queued events, oldest first, keyed by row id. Nothing is removed: the caller shows
+     * them and then calls {@link #deleteEvents}, so a crash in between repeats a notice rather than
+     * losing it.
+     */
+    public java.util.LinkedHashMap<Long, OfflineEvent> peekEvents(UUID player) throws SQLException {
+        var out = new java.util.LinkedHashMap<Long, OfflineEvent>();
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(
+                "SELECT id, type, item, amount, created_at FROM ra_events WHERE player_id=? ORDER BY created_at,id")) {
+            ps.setString(1, player.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.put(rs.getLong("id"), new OfflineEvent(rs.getString("type"), rs.getString("item"),
+                        rs.getDouble("amount"), rs.getLong("created_at")));
+            }
+        }
+        return out;
+    }
+
+    /** Delete delivered events by row id. */
+    public void deleteEvents(java.util.Collection<Long> ids) throws SQLException {
+        if (ids.isEmpty()) {
+            return;
+        }
+        try (Connection c = dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement("DELETE FROM ra_events WHERE id=?")) {
+                for (long id : ids) {
+                    ps.setLong(1, id);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+                c.commit();
+            } catch (SQLException e) { c.rollback(); throw e; }
+            finally { c.setAutoCommit(true); }
         }
     }
 

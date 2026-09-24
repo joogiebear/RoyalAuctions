@@ -3,6 +3,7 @@ package com.mystipixel.royalauctions.gui;
 import com.mystipixel.royalauctions.category.CategoryManager;
 import com.mystipixel.royalauctions.config.PluginConfig;
 import com.mystipixel.royalauctions.data.Listing;
+import com.mystipixel.royalauctions.data.ListingStatus;
 import com.mystipixel.royalauctions.data.ListingType;
 import com.mystipixel.royalauctions.data.SortOrder;
 import com.mystipixel.royalauctions.gui.menu.MenuManager;
@@ -33,6 +34,12 @@ public final class GuiManager {
     private final SignInput signInput;
 
     private final Map<UUID, CreateSession> createSessions = new ConcurrentHashMap<>();
+    /**
+     * Per-player navigation counter. Every menu request takes a ticket, and a menu that loads its
+     * data asynchronously only opens if no newer request came in meanwhile. Otherwise a slow load
+     * (say, a double-clicked hub button) could pop up over the create screen or a confirmation.
+     */
+    private final Map<UUID, Integer> navigation = new ConcurrentHashMap<>();
 
     public GuiManager(JavaPlugin plugin, AuctionService service, PluginConfig config, CategoryManager categories,
                       com.mystipixel.royalauctions.tier.TierManager tiers, MessageManager messages,
@@ -53,7 +60,9 @@ public final class GuiManager {
     /** The {@code /ah} landing menu. Loads the counts the hub icons display, then opens. */
     public void openHub(Player player) {
         UUID uuid = player.getUniqueId();
+        int ticket = ticket(player);
         service.loadBidListings(uuid, bids -> service.loadSellerListings(uuid, mine -> {
+            if (!current(player, ticket)) return;
             int top = 0;
             for (Listing l : bids) {
                 if (l.topBidderId() != null && l.topBidderId().equals(uuid)) {
@@ -71,7 +80,9 @@ public final class GuiManager {
     }
 
     public void openBids(Player player, int page) {
+        int ticket = ticket(player);
         service.loadBidListings(player.getUniqueId(), listings -> {
+            if (!current(player, ticket)) return;
             BidsGui gui = new BidsGui(this, player, listings);
             gui.populate(page);
             player.openInventory(gui.getInventory());
@@ -81,7 +92,9 @@ public final class GuiManager {
 
     /** {@code /ah <username>} — that seller's active auctions. */
     public void openSeller(Player player, UUID sellerId, String sellerName) {
+        int ticket = ticket(player);
         service.loadSellerListings(sellerId, listings -> {
+            if (!current(player, ticket)) return;
             SellerGui gui = new SellerGui(this, player, sellerName, listings);
             gui.populate(0);
             player.openInventory(gui.getInventory());
@@ -98,6 +111,7 @@ public final class GuiManager {
     public void openBrowse(Player player, String category, String search, SortOrder sort, int page) {
         // Open first, then fill: the page is fetched asynchronously, and the menu tracks whether it is
         // still the open inventory before drawing into it.
+        ticket(player);
         BrowseGui gui = new BrowseGui(this, player, category, search, sort);
         player.openInventory(gui.getInventory());
         playOpen(player, "browse");
@@ -105,6 +119,7 @@ public final class GuiManager {
     }
 
     public void openConfirm(Player player, Listing listing, String category, String search, SortOrder sort, int page) {
+        ticket(player);
         if (!config.confirmPurchase()) {
             service.purchase(player, listing, () -> openBrowse(player, category, search, sort, page));
             return;
@@ -121,6 +136,7 @@ public final class GuiManager {
      */
     public void confirmBid(Player player, Listing listing, double amount,
                            String category, String search, SortOrder sort, int page) {
+        ticket(player);
         if (!config.confirmBid()) {
             service.placeBid(player, listing, amount, () -> openBrowse(player, category, search, sort, page));
             return;
@@ -132,6 +148,7 @@ public final class GuiManager {
 
     /** Gate a cancellation behind a confirmation. Falls through when confirmations.cancel is off. */
     public void confirmCancel(Player player, Listing listing, int page) {
+        ticket(player);
         if (!config.confirmCancel()) {
             service.cancelListing(player, listing, () -> openListings(player, page));
             return;
@@ -142,6 +159,7 @@ public final class GuiManager {
     }
 
     public void openBid(Player player, Listing listing, String category, String search, SortOrder sort, int page) {
+        ticket(player);
         BidGui gui = new BidGui(this, listing, category, search, sort, page);
         player.openInventory(gui.getInventory());
         playOpen(player, "bid");
@@ -151,8 +169,26 @@ public final class GuiManager {
         openCollection(player, 0);
     }
 
+    /**
+     * Back from a bid confirmation: re-read the listing, so the bid screen offers the minimum bid
+     * as it is now rather than the one captured when the confirmation opened.
+     */
+    public void reopenBid(Player player, Listing shown, String category, String search, SortOrder sort, int page) {
+        int ticket = ticket(player);
+        service.loadListing(shown.id(), fresh -> {
+            if (!current(player, ticket)) return;
+            if (fresh.isPresent() && fresh.get().status() == ListingStatus.ACTIVE) {
+                openBid(player, fresh.get(), category, search, sort, page);
+            } else {
+                openBrowse(player, category, search, sort, page);
+            }
+        });
+    }
+
     public void openCollection(Player player, int page) {
+        int ticket = ticket(player);
         service.loadCollection(player.getUniqueId(), items -> {
+            if (!current(player, ticket)) return;
             CollectionGui gui = new CollectionGui(this, player, items);
             gui.populate(page);
             player.openInventory(gui.getInventory());
@@ -165,7 +201,9 @@ public final class GuiManager {
     }
 
     public void openListings(Player player, int page) {
+        int ticket = ticket(player);
         service.loadSellerListings(player.getUniqueId(), listings -> {
+            if (!current(player, ticket)) return;
             ListingsGui gui = new ListingsGui(this, player, listings);
             gui.populate(page);
             player.openInventory(gui.getInventory());
@@ -179,6 +217,13 @@ public final class GuiManager {
     }
 
     public void openCreate(Player player) {
+        // Every way into the create flow (hub, browse, /ah sell) comes through here.
+        if (!player.hasPermission("royalauctions.sell")) {
+            endCreateSession(player, true);
+            messages.send(player, "general.no-permission");
+            return;
+        }
+        ticket(player);
         createSessions.computeIfAbsent(player.getUniqueId(),
                 k -> new CreateSession(config.defaultDurationHours(), config.defaultType()));
         CreateAuctionGui gui = new CreateAuctionGui(this, player);
@@ -186,6 +231,7 @@ public final class GuiManager {
     }
 
     public void openDuration(Player player) {
+        ticket(player);
         DurationGui gui = new DurationGui(this, player);
         player.openInventory(gui.getInventory());
         playOpen(player, "duration");
@@ -205,6 +251,7 @@ public final class GuiManager {
             openCreate(player);
             return;
         }
+        ticket(player);
         ConfirmAuctionGui gui = new ConfirmAuctionGui(this, player);
         player.openInventory(gui.getInventory());
         playOpen(player, "confirm-auction");
@@ -268,6 +315,7 @@ public final class GuiManager {
     // ------------------------------------------------------------------ sign input: search / price / bid
 
     public void beginSearch(Player player, String category, SortOrder sort) {
+        ticket(player);
         signInput.request(player, List.of("^^^^^^^^^^^^^^^", "Search by name", "blank = show all"), input -> {
             if (input == null || input.isBlank()) {
                 openBrowse(player, category, null, sort, 0);
@@ -282,7 +330,9 @@ public final class GuiManager {
         if (s == null) {
             return;
         }
-        // Suppress the create screen's return-item-on-close while the sign editor is up.
+        // Suppress the create screen's return-item-on-close while the sign editor is up. The prompt
+        // always answers (null on timeout), which clears this again.
+        ticket(player);
         s.awaitingPrice(true);
         signInput.request(player, List.of("^^^^^^^^^^^^^^^", "Enter a price", "in numbers"), input -> {
             s.awaitingPrice(false);
@@ -300,6 +350,7 @@ public final class GuiManager {
     }
 
     public void beginBidInput(Player player, Listing listing, String category, String search, SortOrder sort, int page) {
+        ticket(player);
         signInput.request(player, List.of("^^^^^^^^^^^^^^^", "Enter your bid", "amount"), input -> {
             if (input == null || input.isBlank() || input.equalsIgnoreCase("cancel")) {
                 openBrowse(player, category, search, sort, page);
@@ -322,6 +373,16 @@ public final class GuiManager {
     public void handleQuit(Player player) {
         // Persisted collection and pending operations survive the session. No offline inventory edits.
         createSessions.remove(player.getUniqueId());
+        navigation.remove(player.getUniqueId());
+    }
+
+    private int ticket(Player player) {
+        return navigation.merge(player.getUniqueId(), 1, Integer::sum);
+    }
+
+    /** True if the player is online and has not asked for another menu since taking {@code ticket}. */
+    private boolean current(Player player, int ticket) {
+        return player.isOnline() && navigation.getOrDefault(player.getUniqueId(), 0) == ticket;
     }
 
     /** Parse a positive amount, accepting k/m/b/t shorthand (e.g. "5k", "50m", "1.5b") and commas. */

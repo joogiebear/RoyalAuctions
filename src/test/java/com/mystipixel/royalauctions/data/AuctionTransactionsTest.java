@@ -156,6 +156,38 @@ class AuctionTransactionsTest {
         assertEquals(ListingStatus.ACTIVE, current(l).status()); assertEquals(0, count("ra_operation_locks"));
     }
 
+    @Test void closingRunnerDeclinesEffectsThatHaveNotStarted() throws Exception {
+        // Shutdown: an exchange whose intent is durable but whose effect has not run is recorded as
+        // not applied, so it finishes cleanly instead of being held as ambiguous.
+        var r = tx.reserveCapture(seller, "Seller", bytes, worker);
+        AtomicInteger calls = new AtomicInteger(); List<ExternalEffectRunner.Result> results = new ArrayList<>();
+        new ExternalEffectRunner(tx, Runnable::run, Runnable::run, worker, e -> fail(e), () -> true)
+                .execute(r.operation().id(), () -> { calls.incrementAndGet(); return true; }, results::add);
+        assertEquals(0, calls.get()); assertEquals(List.of(ExternalEffectRunner.Result.DECLINED), results);
+        assertEquals(DONE, tx.get(r.operation().id()).state());
+        assertEquals(0, count("ra_collection")); assertEquals(0, count("ra_operation_locks"));
+    }
+
+    @Test void closingRunnerLeavesSellerPayoutOwed() throws Exception {
+        var l = seed(ListingType.BIN); complete(tx.reserveBuy(l.id(), alice, "Alice", 100, worker).operation(), true);
+        var payout = tx.pending(50).getFirst(); assertEquals(READY, payout.state());
+        List<ExternalEffectRunner.Result> results = new ArrayList<>();
+        new ExternalEffectRunner(tx, Runnable::run, Runnable::run, worker, e -> fail(e), () -> true)
+                .execute(payout.id(), () -> { throw new AssertionError("must not pay during shutdown"); }, results::add);
+        assertEquals(List.of(ExternalEffectRunner.Result.DECLINED), results);
+        assertEquals(READY, tx.get(payout.id()).state());
+    }
+
+    @Test void deliveredEventsAreRemovedOnlyAfterDelivery() throws Exception {
+        db.addEvent(alice, OfflineEvent.SOLD, "Item", 5, 1); db.addEvent(alice, OfflineEvent.OUTBID, "Item", 6, 2);
+        var first = db.peekEvents(alice);
+        assertEquals(2, first.size()); assertEquals(2, db.peekEvents(alice).size(), "peeking removes nothing");
+        db.addEvent(alice, OfflineEvent.WON, "Item", 7, 3);
+        db.deleteEvents(first.keySet());
+        var left = db.peekEvents(alice);
+        assertEquals(1, left.size()); assertEquals(OfflineEvent.WON, left.values().iterator().next().type());
+    }
+
     @Test void captureAndClaimKeepCustodyUntilEachExternalAcknowledgement() throws Exception {
         var r = tx.reserveCapture(seller, "Seller", bytes, worker); var o = r.operation();
         assertEquals(1, db.collectionItems(seller).size());

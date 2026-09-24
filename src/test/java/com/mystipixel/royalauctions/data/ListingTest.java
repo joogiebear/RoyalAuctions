@@ -59,4 +59,11 @@ class ListingTest {
         assertFalse(l.hasBids());
         assertEquals(200, l.displayPrice(), 1e-9);
     }
+
+    @Test
+    void minimumBidDropsFloatingPointNoise() {
+        // 0.1 + 0.2 is 0.30000000000000004 in doubles; a bid of exactly 0.3 must still qualify.
+        Listing l = auction(0.1, 0.1, UUID.randomUUID(), 1);
+        assertEquals(0.3, l.nextMinBid(0.2), 0.0);
+    }
 }

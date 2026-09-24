@@ -105,6 +105,7 @@ public final class ListingsGui extends AuctionGui {
                 page++;
                 render();
             }
+            case OPEN_HUB -> manager.openHub(player);
             case OPEN_BROWSE -> manager.openBrowse(player);
             case CLOSE -> player.closeInventory();
             default -> {

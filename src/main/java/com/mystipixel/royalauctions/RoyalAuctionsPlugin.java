@@ -13,11 +13,14 @@ import com.mystipixel.royalauctions.hooks.EcoHook;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
 import com.mystipixel.royalauctions.service.AuctionService;
+import com.mystipixel.royalauctions.service.Workers;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.ServiceRegisterEvent;
+import org.bukkit.event.server.ServiceUnregisterEvent;
 import java.util.Locale;
+import java.util.Objects;
 
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -30,6 +33,8 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
 
     /** bStats project id. Identifies the plugin, not the server, so it is fixed rather than configurable. */
     private static final int BSTATS_PLUGIN_ID = 32735;
+    /** How long shutdown waits for exchanges already under way before handing them to /ah recovery. */
+    private static final long SHUTDOWN_WAIT_MILLIS = 10_000L;
 
     private PluginConfig config;
     private MessageManager messages;
@@ -41,6 +46,8 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
     private AuctionService service;
     private MenuManager menus;
     private GuiManager guiManager;
+    private SignInput signInput;
+    private Workers workers;
 
     private BukkitTask expiryTask;
     private BukkitTask recoveryTask;
@@ -52,7 +59,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         this.config = new PluginConfig(this);
-        new com.mystipixel.royalauctions.config.ConfigValidator(this, config).validate();
+        validateConfig();
         this.messages = new MessageManager(this);
         this.vault = new VaultHook();
 
@@ -84,13 +91,14 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         // Vault is a hard dependency, but the economy *provider* (EssentialsX, CMI, an EcoBits currency
         // with vault:true, ...) is a separate plugin and can register after we enable. Disabling here
         // would mean the plugin silently kills itself on a perfectly good server purely because of
-        // plugin load order — so wait for the provider instead.
+        // plugin load order — so wait for the provider instead. The listener also follows providers
+        // that register after startup.
+        getServer().getPluginManager().registerEvents(new EconomyWaiter(), this);
         if (vault.setup()) {
             finishEnable();
         } else {
             getLogger().warning("No Vault economy provider found yet. RoyalAuctions is waiting for one to"
                     + " register (install an economy plugin, e.g. EssentialsX). /ah is unavailable until then.");
-            getServer().getPluginManager().registerEvents(new EconomyWaiter(), this);
             // Fallback, in case the provider registered before our listener was active.
             getServer().getScheduler().runTaskLater(this, this::tryLateEnable, 100L);
         }
@@ -108,8 +116,9 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (econGuard.isPresent()) {
             getLogger().info("EconGuard detected - auction money movements will be reported to the central audit core.");
         }
+        this.workers = new Workers(this);
         try {
-            this.service = new AuctionService(this, database, vault, config, categories, tiers, messages, econGuard);
+            this.service = new AuctionService(this, database, vault, config, categories, tiers, messages, econGuard, workers);
         } catch (RuntimeException e) {
             getLogger().log(Level.SEVERE, "Cannot load payment records safely; disabling RoyalAuctions", e);
             getServer().getPluginManager().disablePlugin(this);
@@ -118,12 +127,12 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         // Bukkit cancels this main-thread task on disable. No async Vault calls.
         getServer().getScheduler().runTaskTimer(this, service::retryPayments, 600L, 600L);
         this.menus = new MenuManager(this);
-        SignInput signInput = new SignInput(this);
+        this.signInput = new SignInput(this);
         getServer().getPluginManager().registerEvents(signInput, this);
         this.guiManager = new GuiManager(this, service, config, categories, tiers, messages, vault, menus, signInput);
 
         getServer().getPluginManager().registerEvents(new AuctionGuiListener(guiManager), this);
-        var notifier = new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault);
+        var notifier = new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault, workers);
         getServer().getPluginManager().registerEvents(notifier, this);
         service.eventNotifier(notifier::notifyOnline);
 
@@ -135,14 +144,18 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
 
         scheduleExpiryTask();
         schedulePruneTask();
-        recoveryTask = getServer().getScheduler().runTaskTimerAsynchronously(this, service::recover, 1L, 100L);
+        // Timers only enqueue: the work runs on the plugin's own database threads, which shutdown
+        // waits for, instead of Bukkit async tasks that could still be running as storage closes.
+        recoveryTask = getServer().getScheduler().runTaskTimer(this, () -> workers.async(service::recover), 1L, 100L);
         service.refreshActiveCount();
-        // The browse menu only repairs the categories it draws, so sweep everything once on startup.
-        service.repairCategoriesOnStartup();
 
         // The eco plugins register their items in a delayed task (their "Loaded X" lines land after
-        // the server reports Done), so the audit has to wait for that or it would see an empty registry.
-        getServer().getScheduler().runTaskLater(this, () -> categories.auditCustomItems(), 100L);
+        // the server reports Done), so the audit, and the category repair sweep (the browse menu only
+        // repairs what it draws), wait for that. Earlier, custom items would be filed by base material.
+        getServer().getScheduler().runTaskLater(this, () -> {
+            categories.auditCustomItems();
+            service.repairAllCategories();
+        }, 100L);
 
         if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             this.placeholderExpansion = new AuctionPlaceholderExpansion(
@@ -167,13 +180,39 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         }
     }
 
-    /** Completes startup if the economy provider registers after we enabled. */
+    /**
+     * Completes startup if the economy provider registers after we enabled, and afterwards follows
+     * Vault's choice of provider: a higher-priority one (e.g. an EcoBits currency) registering after
+     * EssentialsX would otherwise be ignored and auctions would keep paying into the old one.
+     */
     private final class EconomyWaiter implements Listener {
         @EventHandler
         public void onServiceRegister(ServiceRegisterEvent event) {
-            if (!fullyEnabled && event.getProvider().getService() == Economy.class && vault.setup()) {
-                getLogger().info("Vault economy provider detected. Finishing RoyalAuctions startup.");
-                finishEnable();
+            if (event.getProvider().getService() != Economy.class) {
+                return;
+            }
+            if (!fullyEnabled) {
+                if (vault.setup()) {
+                    getLogger().info("Vault economy provider detected. Finishing RoyalAuctions startup.");
+                    finishEnable();
+                }
+                return;
+            }
+            refreshEconomy();
+        }
+
+        @EventHandler
+        public void onServiceUnregister(ServiceUnregisterEvent event) {
+            if (fullyEnabled && event.getProvider().getService() == Economy.class) {
+                refreshEconomy();
+            }
+        }
+
+        private void refreshEconomy() {
+            String before = vault.providerName();
+            if (vault.setup() && !Objects.equals(before, vault.providerName())) {
+                getLogger().info("Vault economy provider changed from " + before + " to "
+                        + vault.providerName() + "; auctions now use it.");
             }
         }
     }
@@ -187,6 +226,10 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
             pruneTask.cancel();
         }
         if (recoveryTask != null) recoveryTask.cancel();
+        // Finish (or durably decline) every exchange already under way before storage closes.
+        if (workers != null) workers.shutdown(SHUTDOWN_WAIT_MILLIS);
+        // Put back any blocks borrowed for sign prompts that are still open.
+        if (signInput != null) signInput.restoreAll();
         // Create-session items are already durable. Do not duplicate pending listings on shutdown.
         if (guiManager != null) guiManager.clearCreateSessions();
         if (placeholderExpansion != null) {
@@ -203,7 +246,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         }
         long interval = config.expirySweepTicks();
         this.expiryTask = getServer().getScheduler()
-                .runTaskTimerAsynchronously(this, () -> service.sweepExpired(), interval, interval);
+                .runTaskTimer(this, () -> workers.async(service::sweepExpired), interval, interval);
     }
 
     /** Daily audit-tail prune (first pass 5 minutes after start). Config 0 keeps everything forever. */
@@ -215,7 +258,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (config.closedRetentionDays() <= 0) {
             return;
         }
-        this.pruneTask = getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+        this.pruneTask = getServer().getScheduler().runTaskTimer(this, () -> workers.async(() -> {
             long cutoff = System.currentTimeMillis()
                     - config.closedRetentionDays() * 24L * 60L * 60L * 1000L;
             try {
@@ -227,12 +270,13 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
             } catch (Exception e) {
                 getLogger().log(Level.WARNING, "Retention prune failed", e);
             }
-        }, 20L * 300L, 20L * 60L * 60L * 24L);
+        }), 20L * 300L, 20L * 60L * 60L * 24L);
     }
 
     /** Reload config, messages and categories. Storage-backend changes still need a restart. */
     public void reloadEverything() {
         config.reload();
+        validateConfig();
         messages.reload();
         categories.load(config.categoriesSection(), config.categoryOptionsSection());
         // Re-read eco's rarities too, so adding a rarity file is picked up by /ah reload.
@@ -240,10 +284,19 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
                 getDataFolder().getParentFile(), getLogger());
         this.tiers.rebind(rarities);
         this.tiers.load(config.tiersSection());
+        if (!fullyEnabled) {
+            return; // /ah is not registered until then, but keep this safe to call regardless
+        }
         menus.reload();
         scheduleExpiryTask();
         schedulePruneTask();
         categories.auditCustomItems();
+        // Categories may have been renamed: refile listings whose category id no longer exists.
+        service.repairAllCategories();
+    }
+
+    private void validateConfig() {
+        new com.mystipixel.royalauctions.config.ConfigValidator(this, config).validate();
     }
 
     public PluginConfig pluginConfig() {

@@ -51,7 +51,7 @@ class AuctionServicePaymentTest {
     }
     void open() throws Exception {
         db = new AuctionDatabase(folder.toFile(), new YamlConfiguration(), Logger.getLogger("test")); db.init();
-        service = new AuctionService(plugin, db, vault, config, categories, tiers, messages, guard);
+        service = new AuctionService(plugin, db, vault, config, categories, tiers, messages, guard, new Workers(plugin, Runnable::run));
     }
     @AfterEach void close() { if (db != null) db.close(); if (bukkit != null) bukkit.close(); }
     Player player(UUID id, String name) {
@@ -102,7 +102,7 @@ class AuctionServicePaymentTest {
     }
     @Test void listingReservationFailureNeverChargesFeeOrNeedsRefund() throws Exception {
         when(config.maxPerPlayer()).thenReturn(-1); when(config.feeFor(50)).thenReturn(5d); when(config.canSellCategory(any())).thenReturn(true);
-        when(categories.categorize(any())).thenReturn("misc");
+        when(categories.categorize(any())).thenReturn("misc"); when(seller.hasPermission("royalauctions.sell")).thenReturn(true);
         ItemStack item = mock(ItemStack.class); when(item.getType()).thenReturn(Material.STONE);
         try (var serialization = mockStatic(ItemSerialization.class)) {
             serialization.when(() -> ItemSerialization.serialize(item)).thenReturn(bytes);
@@ -132,5 +132,40 @@ class AuctionServicePaymentTest {
         assertThrows(IllegalStateException.class, () -> journal.attempt(id, "credit", sellerId, 50, true, () -> { throw new IllegalStateException("unknown"); }));
         db.close(); open(); service.retryPayments(); service.recover();
         verifyNoInteractions(vault); assertEquals("IN_FLIGHT", journal.read(id).getProperty("leg.credit.status"));
+    }
+    @Test void listingWithoutSellPermissionIsRefusedBeforeAnyReservation() throws Exception {
+        List<Boolean> results = new ArrayList<>();
+        service.createListing(seller, UUID.randomUUID(), mock(ItemStack.class), 50, ListingType.BIN, 60_000, results::add);
+        assertEquals(List.of(false), results);
+        verifyNoInteractions(vault); assertTrue(db.transactions().pending(50).isEmpty());
+    }
+    org.bukkit.permissions.PermissionAttachmentInfo permission(String name, boolean value) {
+        var info = mock(org.bukkit.permissions.PermissionAttachmentInfo.class);
+        when(info.getPermission()).thenReturn(name); when(info.getValue()).thenReturn(value); return info;
+    }
+    @Test void listingLimitFollowsPermissionsThenConfig() {
+        when(config.maxPerPlayer()).thenReturn(7);
+        assertEquals(7, service.listingLimit(seller));
+        // Build the permission mocks before stubbing: creating mocks inside when(...) is unfinished stubbing.
+        Set<org.bukkit.permissions.PermissionAttachmentInfo> limits = Set.of(permission("royalauctions.limit.20", true),
+                permission("royalauctions.limit.12", true), permission("royalauctions.limit.99", false));
+        when(seller.getEffectivePermissions()).thenReturn(limits);
+        assertEquals(20, service.listingLimit(seller), "highest granted limit wins; negated ones are ignored");
+        Set<org.bukkit.permissions.PermissionAttachmentInfo> unlimited = Set.of(permission("RoyalAuctions.Limit.Unlimited", true));
+        when(seller.getEffectivePermissions()).thenReturn(unlimited);
+        assertEquals(-1, service.listingLimit(seller));
+        when(seller.getEffectivePermissions()).thenReturn(Set.of());
+        when(config.maxPerPlayer()).thenReturn(-5);
+        assertEquals(-1, service.listingLimit(seller));
+        when(seller.hasPermission("royalauctions.admin")).thenReturn(true);
+        when(config.maxPerPlayer()).thenReturn(7);
+        assertEquals(-1, service.listingLimit(seller));
+    }
+    @Test void longNamesAreCutToWhatTheDatabaseHolds() {
+        assertEquals("short", AuctionService.truncate("short"));
+        String longName = "\uD83D\uDE00".repeat(300); // 300 emoji, two chars each
+        String cut = AuctionService.truncate(longName);
+        assertEquals(AuctionService.MAX_NAME_LENGTH, cut.codePointCount(0, cut.length()));
+        assertTrue(cut.endsWith("…")); assertFalse(Character.isHighSurrogate(cut.charAt(cut.length() - 2)));
     }
 }

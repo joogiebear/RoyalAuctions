@@ -126,16 +126,19 @@ public final class AuctionCommand implements CommandExecutor, TabCompleter {
         }
     }
 
-    /** {@code /ah <username>} — open that seller's active auctions. */
-    @SuppressWarnings("deprecation") // name lookup is intentional: players type names, not UUIDs
+    /**
+     * {@code /ah <username>} — open that seller's active auctions. Only players this server already
+     * knows are looked up: {@code getOfflinePlayer(String)} would block the main thread on a Mojang
+     * request for any unknown name, and anyone can type {@code /ah <random name>}.
+     */
     private void openSellerView(Player viewer, String name) {
         Player online = Bukkit.getPlayerExact(name);
         if (online != null) {
             gui.openSeller(viewer, online.getUniqueId(), online.getName());
             return;
         }
-        OfflinePlayer offline = Bukkit.getOfflinePlayer(name);
-        if (offline.hasPlayedBefore()) {
+        OfflinePlayer offline = Bukkit.getOfflinePlayerIfCached(name);
+        if (offline != null && offline.hasPlayedBefore()) {
             gui.openSeller(viewer, offline.getUniqueId(),
                     offline.getName() != null ? offline.getName() : name);
             return;

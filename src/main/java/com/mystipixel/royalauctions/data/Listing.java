@@ -140,9 +140,17 @@ public final class Listing {
         return isAuction() && hasBids() ? currentBid : price;
     }
 
-    /** Minimum acceptable next bid given the configured increment. */
+    /**
+     * Minimum acceptable next bid given the configured increment. Rounded to six decimal places so
+     * floating-point noise from a percentage increment (110.00000000000001) cannot make the minimum
+     * the menu shows as "110.00" reject a bid of exactly 110.
+     */
     public double nextMinBid(double increment) {
-        return hasBids() ? currentBid + increment : price;
+        double minimum = hasBids() ? currentBid + increment : price;
+        if (!Double.isFinite(minimum)) {
+            return minimum;
+        }
+        return java.math.BigDecimal.valueOf(minimum).setScale(6, java.math.RoundingMode.HALF_UP).doubleValue();
     }
 
     public ItemStack item() {

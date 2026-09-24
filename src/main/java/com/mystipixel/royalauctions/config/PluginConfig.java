@@ -87,6 +87,13 @@ public final class PluginConfig {
 
         loadDurations(listings);
         this.defaultDurationHours = listings.getInt("default-duration-hours", 24);
+        if (durations.stream().noneMatch(d -> d.hours() == defaultDurationHours)) {
+            // The create screen would start on a duration no button offers; use the first one.
+            int fallback = durations.get(0).hours();
+            plugin.getLogger().warning("Config warning: listings.default-duration-hours (" + defaultDurationHours
+                    + ") matches none of listings.durations; using " + fallback + ".");
+            this.defaultDurationHours = fallback;
+        }
         this.defaultType = ListingType.fromString(listings.getString("default-type"), ListingType.BIN);
 
         ConfigurationSection bidding = section(c, "bidding");
@@ -121,6 +128,12 @@ public final class PluginConfig {
                 Object labelObj = map.get("label");
                 String label = labelObj == null ? "Duration" : String.valueOf(labelObj);
                 int hours = map.get("hours") instanceof Number n ? n.intValue() : 24;
+                if (hours <= 0) {
+                    // Used to be accepted and silently listed as 1 hour; a typo should not do that.
+                    plugin.getLogger().warning("Config warning: listings.durations entry '" + label
+                            + "' has hours " + hours + "; it must be at least 1. Skipping it.");
+                    continue;
+                }
                 Object iconObj = map.get("icon");
                 Material icon = Material.matchMaterial(iconObj == null ? "CLOCK" : String.valueOf(iconObj));
                 durations.add(new DurationOption(label, hours, icon == null ? Material.CLOCK : icon));
@@ -254,8 +267,9 @@ public final class PluginConfig {
     }
 
     /** Compute the listing fee for a given sale price. */
+    /** Never negative: a negative fee would make every listing fail as an invalid amount. */
     public double feeFor(double price) {
-        return Math.max(feeMinimum, price * feePercent);
+        return Math.max(0, Math.max(feeMinimum, price * feePercent));
     }
 
     public List<DurationOption> durations() {

@@ -73,8 +73,10 @@ Base command `/auctionhouse`, aliases **`/ah`**, `/auctions`, `/auction`.
 | Node | Default | |
 |---|---|---|
 | `royalauctions.use` | `true` | Open and browse |
-| `royalauctions.sell` | `true` | List items |
-| `royalauctions.admin` | `op` | `/ah reload`, `/ah category`, `/ah recovery` |
+| `royalauctions.sell` | `true` | List items (checked on every way into the create menu, not only `/ah sell`) |
+| `royalauctions.limit.<n>` | — | Allow up to `<n>` active listings, overriding `max-per-player`; the highest granted wins |
+| `royalauctions.limit.unlimited` | — | No active-listing cap |
+| `royalauctions.admin` | `op` | `/ah reload`, `/ah category`, `/ah recovery`; no listing cap |
 
 > NPCs run commands **as the clicking player**, so they inherit that player's permissions. If you
 > restrict `royalauctions.use`, a player without it clicking the NPC gets nothing — that's expected.
