@@ -30,7 +30,7 @@ public enum SortOrder {
             return fallback;
         }
         try {
-            return valueOf(name.toUpperCase());
+            return valueOf(name.toUpperCase(java.util.Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return fallback;
         }

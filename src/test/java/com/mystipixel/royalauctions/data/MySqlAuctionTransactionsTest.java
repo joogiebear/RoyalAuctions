@@ -41,6 +41,29 @@ class MySqlAuctionTransactionsTest extends AuctionTransactionsTest {
         SQLException error = Assertions.assertThrows(SQLException.class, () -> tx.init());
         Assertions.assertTrue(error.getMessage().contains("requires InnoDB"));
     }
+    @Test void columnCheckIgnoresOtherDatabasesOnTheSameServer() throws Exception {
+        // Another RoyalAuctions schema that already has the tier column must not stop ours getting it.
+        String other = database + "_other", upgraded = database + "_old";
+        try (var c = connect(""); var s = c.createStatement()) {
+            s.executeUpdate("CREATE DATABASE " + other); s.executeUpdate("CREATE DATABASE " + upgraded);
+        }
+        try {
+            try (var c = connect(other); var s = c.createStatement()) {
+                s.executeUpdate("CREATE TABLE ra_listings (id CHAR(36) PRIMARY KEY, tier VARCHAR(32))");
+            }
+            try (var c = connect(upgraded); var s = c.createStatement()) { s.executeUpdate(SchemaMigrationTest.PRE_BIDDING_LISTINGS); }
+            var config = config(); config.set("mysql.database", upgraded);
+            var upgradedDb = new AuctionDatabase(folder.toFile(), config, java.util.logging.Logger.getAnonymousLogger());
+            try { upgradedDb.init(); } finally { upgradedDb.close(); }
+            try (var c = connect(upgraded); var rs = c.getMetaData().getColumns(upgraded, null, "ra_listings", "tier")) {
+                Assertions.assertTrue(rs.next(), "tier must be added to the upgraded database");
+            }
+        } finally {
+            try (var c = connect(""); var s = c.createStatement()) {
+                s.executeUpdate("DROP DATABASE IF EXISTS " + other); s.executeUpdate("DROP DATABASE IF EXISTS " + upgraded);
+            }
+        }
+    }
     @Override @AfterEach void close() {
         if (db != null) super.close();
         if (database == null) return;

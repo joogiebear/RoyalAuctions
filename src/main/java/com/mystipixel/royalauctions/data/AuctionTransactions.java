@@ -80,8 +80,16 @@ public final class AuctionTransactions {
     }
     private static UUID uuid(String s) { return s == null ? null : UUID.fromString(s); }
     private static UUID key(String text) { return UUID.nameUUIDFromBytes(text.getBytes(StandardCharsets.UTF_8)); }
-    private static boolean duplicate(SQLException e) {
-        return e.getErrorCode() == 1062 || e.getErrorCode() == 19 || "23505".equals(e.getSQLState());
+    /**
+     * A primary-key or unique clash. SQLite reports every constraint failure (NOT NULL, CHECK, a
+     * trigger's abort, ...) as code 19, so only its key-clash messages count; anything else is a
+     * real error and must not be mistaken for "already locked".
+     */
+    static boolean duplicate(SQLException e) {
+        if (e.getErrorCode() == 1062 || "23505".equals(e.getSQLState())) return true;
+        String message = e.getMessage();
+        return e.getErrorCode() == 19 && message != null && (message.contains("UNIQUE constraint failed")
+                || message.contains("SQLITE_CONSTRAINT_PRIMARYKEY") || message.contains("SQLITE_CONSTRAINT_UNIQUE"));
     }
     private static void lock(Connection c, String resource, UUID operation) throws SQLException {
         try { update(c, "INSERT INTO ra_operation_locks(resource,operation_id) VALUES (?,?)", resource, operation); }
@@ -327,7 +335,10 @@ public final class AuctionTransactions {
     }
     public List<Operation> pending(int limit, int offset) throws SQLException {
         try (Connection c = source.getConnection(); PreparedStatement ps = statement(c,
-                "SELECT * FROM ra_operations WHERE state<>'DONE' ORDER BY created_at,id LIMIT ? OFFSET ?", limit, offset); ResultSet rs = ps.executeQuery()) {
+                // Listed explicitly rather than state<>'DONE', so the (state,...) index skips the
+                // ever-growing history of finished operations instead of scanning it.
+                "SELECT * FROM ra_operations WHERE state IN ('PREPARED','APPLYING','APPLIED','FAILED','READY') "
+                        + "ORDER BY created_at,id LIMIT ? OFFSET ?", limit, offset); ResultSet rs = ps.executeQuery()) {
             List<Operation> out = new ArrayList<>(); while (rs.next()) out.add(operation(rs)); return out;
         }
     }
