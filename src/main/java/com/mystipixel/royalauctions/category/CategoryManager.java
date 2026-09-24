@@ -29,10 +29,16 @@ public final class CategoryManager {
     private final EcoHook eco;
     private final Logger logger;
 
-    private final List<Category> ordered = new ArrayList<>();
-    private final Map<String, Category> byId = new LinkedHashMap<>();
-    private String fallbackId = "misc";
-    private boolean strictItems = false;
+    /**
+     * Everything {@link #load} builds, published in one volatile write. Listings are categorised and
+     * repaired off the main thread while {@code /ah reload} runs on it; clearing shared collections in
+     * place let those readers see no categories at all and permanently file listings under the
+     * fallback (or throw ConcurrentModificationException).
+     */
+    private record State(List<Category> ordered, Map<String, Category> byId, String fallbackId, boolean strictItems) {
+    }
+
+    private volatile State state = new State(List.of(), Map.of(), "misc", false);
 
     public CategoryManager(EcoHook eco, Logger logger) {
         this.eco = eco;
@@ -40,12 +46,14 @@ public final class CategoryManager {
     }
 
     public void load(ConfigurationSection section, ConfigurationSection options) {
-        ordered.clear();
-        byId.clear();
-        this.strictItems = options != null && options.getBoolean("strict-items", false);
+        List<Category> ordered = new ArrayList<>();
+        Map<String, Category> byId = new LinkedHashMap<>();
+        boolean strictItems = options != null && options.getBoolean("strict-items", false);
+        String fallbackId = state.fallbackId();
 
         if (section == null) {
             logger.warning("No 'categories' section found in config.yml — items will be uncategorised.");
+            state = new State(List.of(), Map.of(), fallbackId, strictItems);
             return;
         }
 
@@ -74,6 +82,7 @@ public final class CategoryManager {
         if (!ordered.isEmpty()) {
             fallbackId = ordered.get(ordered.size() - 1).id();
         }
+        state = new State(List.copyOf(ordered), java.util.Collections.unmodifiableMap(byId), fallbackId, strictItems);
         logger.info("Loaded " + ordered.size() + " auction categories"
                 + (strictItems ? " (strict-items: only pinned items are categorised)." : "."));
     }
@@ -88,6 +97,9 @@ public final class CategoryManager {
      * inference is never a black box to a server admin.
      */
     public CategoryMatch explain(ItemStack item) {
+        State state = this.state;
+        List<Category> ordered = state.ordered();
+        String fallbackId = state.fallbackId();
         String key = keyOf(item);
 
         // 1. An explicit pin always wins, whatever the priority order says.
@@ -98,7 +110,7 @@ public final class CategoryManager {
         }
 
         // 2. strict-items: no inference at all — unpinned items go to the catch-all.
-        if (strictItems) {
+        if (state.strictItems()) {
             return new CategoryMatch(fallbackId, "strict-items is on and " + key + " is not pinned");
         }
 
@@ -135,7 +147,7 @@ public final class CategoryManager {
      * instead of having to enumerate every material in the game.
      */
     public void auditCustomItems() {
-        if (ordered.isEmpty()) {
+        if (state.ordered().isEmpty()) {
             return;
         }
         Map<String, ItemStack> customItems = eco.allCustomItems();
@@ -156,7 +168,7 @@ public final class CategoryManager {
         }
         java.util.Collections.sort(unresolved);
         logger.info("Category audit: " + unresolved.size() + " of " + customItems.size()
-                + " eco item(s) fell through to '" + fallbackId + "'. Pin them under a category's"
+                + " eco item(s) fell through to '" + state.fallbackId() + "'. Pin them under a category's"
                 + " match.items: if they belong elsewhere:");
         for (String id : unresolved) {
             logger.info("  - " + id);
@@ -165,23 +177,23 @@ public final class CategoryManager {
 
     /** The category id an item that matches nothing lands in (the highest-priority catch-all). */
     public String fallbackId() {
-        return fallbackId;
+        return state.fallbackId();
     }
 
     public List<Category> categories() {
-        return List.copyOf(ordered);
+        return state.ordered();
     }
 
     public Category byId(String id) {
-        return id == null ? null : byId.get(id.toLowerCase(Locale.ROOT));
+        return id == null ? null : state.byId().get(id.toLowerCase(Locale.ROOT));
     }
 
     /** True if this id is one of the configured categories (used to detect stale/renamed categories). */
     public boolean isKnown(String categoryId) {
-        return categoryId != null && byId.containsKey(categoryId.toLowerCase(Locale.ROOT));
+        return categoryId != null && state.byId().containsKey(categoryId.toLowerCase(Locale.ROOT));
     }
 
     public boolean isEmpty() {
-        return ordered.isEmpty();
+        return state.ordered().isEmpty();
     }
 }

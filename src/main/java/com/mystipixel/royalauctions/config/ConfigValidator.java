@@ -3,7 +3,8 @@ package com.mystipixel.royalauctions.config;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Sanity-checks RoyalAuctions' config on load and warns about values that would silently misbehave.
+ * Sanity-checks RoyalAuctions' config on load and on {@code /ah reload}, and warns about values
+ * that would silently misbehave. Duration problems are reported while the durations are parsed.
  * Warn-only: the plugin still runs (the parsed {@link PluginConfig} already applies safe fallbacks),
  * but an admin sees exactly what looks wrong.
  */
@@ -18,7 +19,9 @@ public final class ConfigValidator {
     }
 
     public void validate() {
-        if (config.feePercent() < 0 || config.feePercent() > 1) {
+        if (config.feePercent() < 0) {
+            warn("listings.fee.percent is negative; the fee is floored at zero.");
+        } else if (config.feePercent() > 1) {
             warn("listings.fee.percent is " + config.feePercent() + "; expected a fraction between 0 and 1 (e.g. 0.02 = 2%).");
         }
         if (config.feeMinimum() < 0) {
@@ -33,6 +36,9 @@ public final class ConfigValidator {
         }
         if (config.maxPerPlayer() == 0) {
             warn("listings.max-per-player is 0; nobody can create a listing. Use -1 for unlimited.");
+        } else if (config.maxPerPlayer() < -1) {
+            warn("listings.max-per-player is " + config.maxPerPlayer() + "; any negative value means unlimited."
+                    + " Use -1 to say so explicitly.");
         }
         if (config.bidMinIncrement() <= 0) {
             warn("bidding.min-increment is <= 0; bids could be raised by nothing.");
