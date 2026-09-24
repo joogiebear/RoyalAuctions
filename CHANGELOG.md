@@ -1,3 +1,15 @@
+## 2026.39.1 — 2026-09-24
+
+### 🐛 Fixes
+- finish in-flight exchanges on shutdown and honour listing-limit permissions (`f112121`)
+- literal message placeholders, atomic category reloads, stricter config checks (`ca46e09`)
+- guard sign prompts, stale menus and repeat clicks (`b204bb3`)
+- scope MySQL migrations, index browse filters, harden duplicate checks (`c2b35bc`)
+- keep the sign prompt off block entities and blocks already in use (`6e85386`)
+
+### 📝 Documentation
+- add MIT license (`7c642fa`)
+
 ## 2026.39.0 — 2026-09-23
 
 ### 🔧 Other
