@@ -146,10 +146,13 @@ class AuctionServicePaymentTest {
     @Test void listingLimitFollowsPermissionsThenConfig() {
         when(config.maxPerPlayer()).thenReturn(7);
         assertEquals(7, service.listingLimit(seller));
-        when(seller.getEffectivePermissions()).thenReturn(Set.of(permission("royalauctions.limit.20", true),
-                permission("royalauctions.limit.12", true), permission("royalauctions.limit.99", false)));
+        // Build the permission mocks before stubbing: creating mocks inside when(...) is unfinished stubbing.
+        Set<org.bukkit.permissions.PermissionAttachmentInfo> limits = Set.of(permission("royalauctions.limit.20", true),
+                permission("royalauctions.limit.12", true), permission("royalauctions.limit.99", false));
+        when(seller.getEffectivePermissions()).thenReturn(limits);
         assertEquals(20, service.listingLimit(seller), "highest granted limit wins; negated ones are ignored");
-        when(seller.getEffectivePermissions()).thenReturn(Set.of(permission("RoyalAuctions.Limit.Unlimited", true)));
+        Set<org.bukkit.permissions.PermissionAttachmentInfo> unlimited = Set.of(permission("RoyalAuctions.Limit.Unlimited", true));
+        when(seller.getEffectivePermissions()).thenReturn(unlimited);
         assertEquals(-1, service.listingLimit(seller));
         when(seller.getEffectivePermissions()).thenReturn(Set.of());
         when(config.maxPerPlayer()).thenReturn(-5);
