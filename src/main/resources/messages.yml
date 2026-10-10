@@ -91,6 +91,10 @@ exchange:
   declined: "{prefix}&eThe exchange could not be completed. Your previous auction and collection state was retained."
   invalid-listing: "{prefix}&cInvalid listing price or duration."
   purchased: "{prefix}&aPurchase completed. Your item is saved in &f/ah collect&a."
+  # Shown when EconGuard refuses a bid or purchase (enforcement.block-flagged-trades on, player flagged).
+  # The other side is not told why: a flag is staff business.
+  restricted-self: "{prefix}&cYour account can't trade right now. Contact staff if you think this is a mistake."
+  restricted-other: "{prefix}&cYou can't trade with {player} right now."
   # Why an exchange was refused, shown through {reason} above.
   reasons:
     already-pending: "An operation is already pending for this item or auction."

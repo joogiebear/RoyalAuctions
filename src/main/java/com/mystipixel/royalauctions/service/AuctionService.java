@@ -75,7 +75,15 @@ public final class AuctionService {
         return player.isOnline() && (amount == 0 || vault.withdraw(player, amount));
     }
 
+    private boolean vetoed(Player player, Listing listing) {
+        if (!econGuard.allow(player.getUniqueId())) tell(player, "exchange.restricted-self");
+        else if (!econGuard.allow(listing.sellerId())) tell(player, "exchange.restricted-other", "player", listing.sellerName());
+        else return false;
+        return true;
+    }
+
     public void placeBid(Player bidder, Listing shown, double amount, Runnable onDone) {
+        if (vetoed(bidder, shown)) { onDone.run(); return; }
         UUID player = bidder.getUniqueId(); String name = bidder.getName();
         async(() -> {
             try {
@@ -98,6 +106,7 @@ public final class AuctionService {
     }
 
     public void purchase(Player buyer, Listing shown, Runnable onDone) {
+        if (vetoed(buyer, shown)) { onDone.run(); return; }
         UUID player = buyer.getUniqueId(); String name = buyer.getName();
         async(() -> {
             try {

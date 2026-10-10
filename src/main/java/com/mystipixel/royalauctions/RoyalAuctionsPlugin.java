@@ -112,9 +112,12 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         fullyEnabled = true;
 
         com.mystipixel.royalauctions.hooks.EconGuardHook econGuard =
-                new com.mystipixel.royalauctions.hooks.EconGuardHook();
+                new com.mystipixel.royalauctions.hooks.EconGuardHook(getLogger());
         if (econGuard.isPresent()) {
-            getLogger().info("EconGuard detected - auction money movements will be reported to the central audit core.");
+            getLogger().info("EconGuard detected - auction money movements will be reported to the central audit core"
+                    + (econGuard.hasVeto()
+                    ? "; flagged players can't bid or buy when EconGuard's enforcement.block-flagged-trades is on."
+                    : "; this EconGuard predates the pre-trade veto, so nothing is blocked."));
         }
         this.workers = new Workers(this);
         try {
