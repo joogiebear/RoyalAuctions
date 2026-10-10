@@ -67,8 +67,8 @@ public final class CollectionGui extends AuctionGui {
             CollectionItem ci = items.get(from + i);
             ItemStack icon = GuiUtil.appendLore(ci.item(), List.of(
                     "",
-                    "&7Reason: &f" + prettyReason(ci.reason()),
-                    "&eClick to claim"));
+                    manager.t("collection-reason", "reason", prettyReason(ci.reason())),
+                    manager.t("click-claim")));
             inventory.setItem(slot, icon);
             slotToItem.put(slot, ci);
         }
@@ -76,9 +76,9 @@ public final class CollectionGui extends AuctionGui {
 
     private String prettyReason(CollectionItem.Reason reason) {
         return switch (reason) {
-            case PURCHASE -> "Purchase";
-            case EXPIRED -> "Expired listing";
-            case CANCELLED -> "Cancelled listing";
+            case PURCHASE -> manager.t("reason.purchase");
+            case EXPIRED -> manager.t("reason.expired");
+            case CANCELLED -> manager.t("reason.cancelled");
         };
     }
 
