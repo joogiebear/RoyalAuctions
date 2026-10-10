@@ -12,6 +12,7 @@ import com.mystipixel.royalauctions.gui.menu.MenuTemplate;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
 import com.mystipixel.royalauctions.service.AuctionService;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -297,6 +298,14 @@ public final class GuiManager {
 
     /** All create items are already journalled in collection; shutdown never copies them again. */
     public void clearCreateSessions() { createSessions.clear(); }
+
+    public void closeMenus() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getOpenInventory().getTopInventory().getHolder() instanceof AuctionGui) {
+                player.closeInventory();
+            }
+        }
+    }
 
     public void captureCreateItem(Player player, int slot, ItemStack expected) {
         CreateSession s = createSessions.get(player.getUniqueId());
