@@ -232,6 +232,8 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         if (signInput != null) signInput.restoreAll();
         // Create-session items are already durable. Do not duplicate pending listings on shutdown.
         if (guiManager != null) guiManager.clearCreateSessions();
+        // Last: drained callbacks can reopen menus, and with sessions cleared the close refunds nothing.
+        if (guiManager != null) guiManager.closeMenus();
         if (placeholderExpansion != null) {
             placeholderExpansion.unregister();
         }
