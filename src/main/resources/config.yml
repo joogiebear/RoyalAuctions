@@ -27,7 +27,7 @@ storage:
 listings:
   # Auctions/listings are created entirely through the GUI (open with /ah, click
   # "Create Auction"). The seller deposits the item, sets a price by typing it in
-  # chat, picks a duration, toggles Buy-It-Now vs Auction, then confirms.
+  # a text box, picks a duration, toggles Buy-It-Now vs Auction, then confirms.
 
   # Selectable listing durations shown on the "Auction Duration" screen.
   durations:
