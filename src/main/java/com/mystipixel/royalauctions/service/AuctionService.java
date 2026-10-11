@@ -5,6 +5,8 @@ import com.mystipixel.royalauctions.config.PluginConfig;
 import com.mystipixel.royalauctions.data.*;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
+import com.mystipixel.royalauctions.search.EnchantmentBackfill;
+import com.mystipixel.royalauctions.search.EnchantmentIndex;
 import com.mystipixel.royalauctions.util.Text;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -12,6 +14,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.permissions.PermissionAttachmentInfo;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -171,7 +174,8 @@ public final class AuctionService {
         if (!config.canSellCategory(category)) { messages.send(seller, "sell.category-not-allowed", "category", category); completed.accept(false); return; }
         long now = System.currentTimeMillis();
         Listing listing = new Listing(UUID.randomUUID(), seller.getUniqueId(), seller.getName(), ItemSerialization.serialize(item),
-                displayNameOf(item), category, tiers.tierOf(item), type, price, now, Math.addExact(now, duration), ListingStatus.DRAFT, 0, null, null, 0);
+                displayNameOf(item), category, tiers.tierOf(item), type, price, now, Math.addExact(now, duration), ListingStatus.DRAFT, 0, null, null, 0,
+                EnchantmentIndex.of(item));
         double fee = config.feeFor(price);
         int limit = listingLimit(seller);
         async(() -> {
@@ -273,6 +277,18 @@ public final class AuctionService {
                 repairStaleCategories(db.activeListings());
             } catch (Exception e) {
                 logError("repairing listing categories", e);
+            }
+        });
+    }
+
+    /** Index the enchantments of listings from before enchantment search. Once per start, not on reload. */
+    public void backfillEnchantmentIndex() {
+        async(() -> {
+            try {
+                new EnchantmentBackfill(db, data -> EnchantmentIndex.of(ItemSerialization.deserialize(data)),
+                        workers::closing, plugin.getLogger()).run();
+            } catch (SQLException e) {
+                logError("indexing listing enchantments for search", e);
             }
         });
     }

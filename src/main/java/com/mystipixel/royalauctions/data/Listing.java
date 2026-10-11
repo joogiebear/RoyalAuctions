@@ -29,12 +29,21 @@ public final class Listing {
     private final UUID topBidderId;
     private final String topBidderName;
     private final int bidCount;
+    private final String enchantmentIndex;  // null until indexed, see EnchantmentIndex
 
     private transient ItemStack cachedItem;
 
     public Listing(UUID id, UUID sellerId, String sellerName, byte[] itemData, String displayName,
                    String category, String tier, ListingType type, double price, long createdAt, long expiresAt,
                    ListingStatus status, double currentBid, UUID topBidderId, String topBidderName, int bidCount) {
+        this(id, sellerId, sellerName, itemData, displayName, category, tier, type, price, createdAt, expiresAt,
+                status, currentBid, topBidderId, topBidderName, bidCount, null);
+    }
+
+    public Listing(UUID id, UUID sellerId, String sellerName, byte[] itemData, String displayName,
+                   String category, String tier, ListingType type, double price, long createdAt, long expiresAt,
+                   ListingStatus status, double currentBid, UUID topBidderId, String topBidderName, int bidCount,
+                   String enchantmentIndex) {
         this.id = id;
         this.sellerId = sellerId;
         this.sellerName = sellerName;
@@ -51,6 +60,7 @@ public final class Listing {
         this.topBidderId = topBidderId;
         this.topBidderName = topBidderName;
         this.bidCount = bidCount;
+        this.enchantmentIndex = enchantmentIndex;
     }
 
     public UUID id() {
@@ -125,6 +135,10 @@ public final class Listing {
 
     public int bidCount() {
         return bidCount;
+    }
+
+    public String enchantmentIndex() {
+        return enchantmentIndex;
     }
 
     public boolean isAuction() {

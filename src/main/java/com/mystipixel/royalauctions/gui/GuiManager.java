@@ -11,6 +11,7 @@ import com.mystipixel.royalauctions.gui.menu.MenuManager;
 import com.mystipixel.royalauctions.gui.menu.MenuTemplate;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
+import com.mystipixel.royalauctions.search.SearchTerms;
 import com.mystipixel.royalauctions.service.AuctionService;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -35,6 +36,7 @@ public final class GuiManager {
     private final VaultHook vault;
     private final MenuManager menus;
     private final TextInput textInput;
+    private final SearchTerms searchTerms = new SearchTerms();
 
     private final Map<UUID, CreateSession> createSessions = new ConcurrentHashMap<>();
     /**
@@ -482,6 +484,11 @@ public final class GuiManager {
     }
 
     /** Menu text from {@code messages.yml} ({@code gui.<key>}), placeholders filled in. */
+    /** Translated item names and enchantment names that searches also match. */
+    public SearchTerms searchTerms() {
+        return searchTerms;
+    }
+
     public String t(String key, String... kv) {
         return messages.text("gui." + key, kv);
     }
