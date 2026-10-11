@@ -14,6 +14,7 @@ import com.mystipixel.royalauctions.message.MessageManager;
 import com.mystipixel.royalauctions.service.AuctionService;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -22,7 +23,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Opens every menu and runs the sign-based text input flows (search / price / bid). */
+/** Opens every menu and runs the text input flows (search / price / bid). */
 public final class GuiManager {
 
     private final JavaPlugin plugin;
@@ -33,7 +34,7 @@ public final class GuiManager {
     private final MessageManager messages;
     private final VaultHook vault;
     private final MenuManager menus;
-    private final SignInput signInput;
+    private final TextInput textInput;
 
     private final Map<UUID, CreateSession> createSessions = new ConcurrentHashMap<>();
     /**
@@ -45,7 +46,7 @@ public final class GuiManager {
 
     public GuiManager(JavaPlugin plugin, AuctionService service, PluginConfig config, CategoryManager categories,
                       com.mystipixel.royalauctions.tier.TierManager tiers, MessageManager messages,
-                      VaultHook vault, MenuManager menus, SignInput signInput) {
+                      VaultHook vault, MenuManager menus, TextInput textInput) {
         this.plugin = plugin;
         this.service = service;
         this.config = config;
@@ -54,7 +55,7 @@ public final class GuiManager {
         this.messages = messages;
         this.vault = vault;
         this.menus = menus;
-        this.signInput = signInput;
+        this.textInput = textInput;
     }
 
     // ------------------------------------------------------------------ hub / bids / seller view
@@ -332,15 +333,13 @@ public final class GuiManager {
         }
     }
 
-    // ------------------------------------------------------------------ sign input: search / price / bid
-
     public void beginSearch(Player player, String category, SortOrder sort) {
         ticket(player);
-        signInput.request(player, List.of("^^^^^^^^^^^^^^^", t("sign.search-1"), t("sign.search-2")), input -> {
-            if (input == null || input.isBlank()) {
-                openBrowse(player, category, null, sort, 0);
+        textInput.request(player, List.of(t("sign.search-1"), t("sign.search-2")), input -> {
+            if (input == null) {
+                if (canReopen(player)) openBrowse(player, category, null, sort, 0);
             } else {
-                openBrowse(player, category, input, sort, 0);
+                openBrowse(player, category, input.isBlank() ? null : input, sort, 0);
             }
         });
     }
@@ -350,13 +349,18 @@ public final class GuiManager {
         if (s == null) {
             return;
         }
-        // Suppress the create screen's return-item-on-close while the sign editor is up. The prompt
-        // always answers (null on timeout), which clears this again.
+        // Stops the create screen's close from returning the item while the dialog is up. The prompt
+        // always answers, null included, which clears this again.
         ticket(player);
         s.awaitingPrice(true);
-        signInput.request(player, List.of("^^^^^^^^^^^^^^^", t("sign.price-1"), t("sign.price-2")), input -> {
+        textInput.request(player, List.of(t("sign.price-1"), t("sign.price-2")), input -> {
             s.awaitingPrice(false);
-            if (input != null && !input.isBlank() && !input.equalsIgnoreCase("cancel")) {
+            if (input == null) {
+                // The item stays in the collection and in the session, so /ah sell picks it up again.
+                if (canReopen(player)) openCreate(player);
+                return;
+            }
+            if (!input.isBlank() && !input.equalsIgnoreCase("cancel")) {
                 Double price = parsePositive(input);
                 if (price == null) {
                     messages.send(player, "general.invalid-number");
@@ -371,8 +375,12 @@ public final class GuiManager {
 
     public void beginBidInput(Player player, Listing listing, String category, String search, SortOrder sort, int page) {
         ticket(player);
-        signInput.request(player, List.of("^^^^^^^^^^^^^^^", t("sign.bid-1"), t("sign.bid-2")), input -> {
-            if (input == null || input.isBlank() || input.equalsIgnoreCase("cancel")) {
+        textInput.request(player, List.of(t("sign.bid-1"), t("sign.bid-2")), input -> {
+            if (input == null) {
+                if (canReopen(player)) openBrowse(player, category, search, sort, page);
+                return;
+            }
+            if (input.isBlank() || input.equalsIgnoreCase("cancel")) {
                 openBrowse(player, category, search, sort, page);
                 return;
             }
@@ -386,6 +394,16 @@ public final class GuiManager {
                 confirmBid(player, listing, amount, category, search, sort, page);
             }
         });
+    }
+
+    // After a null answer: the player may have quit, died, opened another menu or started a newer
+    // prompt, and none of those should be covered by our menu.
+    private boolean canReopen(Player player) {
+        if (!player.isOnline() || player.isDead() || textInput.isWaiting(player)) {
+            return false;
+        }
+        InventoryType top = player.getOpenInventory().getTopInventory().getType();
+        return top == InventoryType.CRAFTING || top == InventoryType.CREATIVE;
     }
 
     // ------------------------------------------------------------------ housekeeping

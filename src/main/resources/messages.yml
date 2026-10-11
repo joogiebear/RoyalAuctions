@@ -107,6 +107,11 @@ exchange:
 
 payment-pending: "{prefix}&eAn auction payment is on hold. Staff can check its status; do not repeat the transaction."
 
+# Buttons of the text input dialog (search, price, custom bid). Escape works like Cancel.
+input:
+  confirm: "&aDone"
+  cancel: "&cCancel"
+
 # Text inside the menus: item names, lore lines and filter labels. Colour codes work; {placeholders}
 # are filled in by the plugin.
 gui:
@@ -175,7 +180,8 @@ gui:
     purchase: "Purchase"
     expired: "Expired listing"
     cancelled: "Cancelled listing"
-  # Lines 3-4 of the sign used for text input (line 1 is where the player types).
+  # Text input dialog: the first line of each pair is the title, the second sits under it.
+  # (The key is still "sign" so existing translations keep working.)
   sign:
     search-1: "Search by name"
     search-2: "blank = show all"
