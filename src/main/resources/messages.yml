@@ -41,6 +41,10 @@ collection:
   claimed: "{prefix}&aClaimed &f{item}&a."
   earnings-claimed: "{prefix}&aCollected &f{amount} &afrom the sale of &f{item}&a."
   no-earnings: "{prefix}&7You have no sale earnings to collect."
+  # Sent a few seconds after join when items or sale earnings are waiting in the collection, for
+  # example an item that was being listed when the player left. Not sent when the "away" summary
+  # below already points at /ah collect. Placeholders: {items} (number of items), {earnings} (money).
+  waiting: "{prefix}&eYou have unclaimed items or earnings. Claim them with &f/ah collect&e."
 
 expiry:
   expired-notify: "{prefix}&e{count} &7of your listings expired and were returned to &f/ah collect&7."

@@ -603,6 +603,16 @@ public final class AuctionDatabase {
         return out;
     }
 
+    public int countCollectionItems(UUID ownerId) throws SQLException {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT COUNT(*) FROM ra_collection WHERE owner_id=?")) {
+            ps.setString(1, ownerId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
     static Listing mapListing(ResultSet rs) throws SQLException {
         String topBidder = rs.getString("top_bidder_id");
         String typeStr = rs.getString("type");
