@@ -7,6 +7,7 @@ import com.mystipixel.royalauctions.data.ListingQuery;
 import com.mystipixel.royalauctions.data.ListingPage;
 import com.mystipixel.royalauctions.data.SortOrder;
 import com.mystipixel.royalauctions.gui.menu.MenuTemplate;
+import com.mystipixel.royalauctions.search.SearchTerms;
 import com.mystipixel.royalauctions.tier.Tier;
 import com.mystipixel.royalauctions.util.Text;
 import org.bukkit.Bukkit;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Auction Browser — layout from gui/browse.yml. Categories fill the {@code category-slots} region
@@ -56,6 +58,8 @@ public final class BrowseGui extends AuctionGui {
 
     private String category;
     private String search;
+    private String resolvedSearch;
+    private SearchTerms.Match searchMatch = SearchTerms.Match.NONE;
     private SortOrder sort;
     private int page;
     /** The page the slots currently show. {@code page} runs ahead of it while a fetch is in flight. */
@@ -94,7 +98,12 @@ public final class BrowseGui extends AuctionGui {
             case AUCTION -> ListingType.AUCTION;
             case ALL -> null;
         };
-        return new ListingQuery(category, tier, typed, search, sort);
+        if (!Objects.equals(search, resolvedSearch)) {
+            searchMatch = manager.searchTerms().resolve(search);
+            resolvedSearch = search;
+        }
+        return new ListingQuery(category, tier, typed, search, sort,
+                searchMatch.itemNames(), searchMatch.enchantmentTokens());
     }
 
     /**

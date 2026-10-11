@@ -141,6 +141,8 @@ public final class AuctionDatabase {
             addColumn(st, "top_bidder_id", "CHAR(36)");
             addColumn(st, "top_bidder_name", "VARCHAR(32)");
             addColumn(st, "bid_count", "INT NOT NULL DEFAULT 0");
+            // Search text for the item's enchantments. NULL = not indexed yet (rows from older versions).
+            addColumn(st, "enchantments", bigText());
             // Category and tier ids are compared exactly (so the browse filters can use an index);
             // new rows are stored lowercase, and rows from older versions are brought in line here.
             st.executeUpdate("UPDATE ra_listings SET category=LOWER(category) WHERE category<>LOWER(category)");
@@ -250,8 +252,8 @@ public final class AuctionDatabase {
     static void insertListing(Connection c, Listing l, ListingStatus status) throws SQLException {
         String sql = "INSERT INTO ra_listings "
                 + "(id,seller_id,seller_name,item_data,display_name,category,tier,type,price,"
-                + "current_bid,top_bidder_id,top_bidder_name,bid_count,created_at,expires_at,status) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "current_bid,top_bidder_id,top_bidder_name,bid_count,created_at,expires_at,status,enchantments) "
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, l.id().toString());
             ps.setString(2, l.sellerId().toString());
@@ -269,7 +271,49 @@ public final class AuctionDatabase {
             ps.setLong(14, l.createdAt());
             ps.setLong(15, l.expiresAt());
             ps.setString(16, status.name());
+            ps.setString(17, l.enchantmentIndex());
             ps.executeUpdate();
+        }
+    }
+
+    /** A listing's id and serialized item, as read for indexing. */
+    public record StoredItem(String id, byte[] itemData) { }
+
+    /** Active listings with no enchantment index yet, in id order after {@code afterId}. */
+    public List<StoredItem> listingsWithoutEnchantmentIndex(String afterId, int limit) throws SQLException {
+        List<StoredItem> out = new ArrayList<>();
+        String sql = "SELECT id,item_data FROM ra_listings WHERE status='ACTIVE' AND enchantments IS NULL AND id > ? "
+                + "ORDER BY id LIMIT ?";
+        try (Connection c = dataSource.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, afterId);
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new StoredItem(rs.getString("id"), ItemSerialization.fromBase64(rs.getString("item_data"))));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Store enchantment indexes by listing id in one transaction. Rows indexed meanwhile are left alone. */
+    public void saveEnchantmentIndexes(java.util.Map<String, String> indexes) throws SQLException {
+        if (indexes.isEmpty()) {
+            return;
+        }
+        try (Connection c = dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "UPDATE ra_listings SET enchantments=? WHERE id=? AND enchantments IS NULL")) {
+                for (var entry : indexes.entrySet()) {
+                    ps.setString(1, entry.getValue());
+                    ps.setString(2, entry.getKey());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+                c.commit();
+            } catch (SQLException e) { c.rollback(); throw e; }
+            finally { c.setAutoCommit(true); }
         }
     }
 
@@ -347,8 +391,19 @@ public final class AuctionDatabase {
             params.add(query.type().name());
         }
         if (query.search() != null) {
-            where.append(" AND LOWER(display_name) LIKE ? ESCAPE '!'");
+            where.append(" AND (LOWER(display_name) LIKE ? ESCAPE '!'");
             params.add("%" + escapeLike(query.search().toLowerCase(Locale.ROOT)) + "%");
+            if (!query.searchItemNames().isEmpty()) {
+                where.append(" OR LOWER(display_name) IN (")
+                        .append(String.join(",", java.util.Collections.nCopies(query.searchItemNames().size(), "?")))
+                        .append(")");
+                params.addAll(query.searchItemNames());
+            }
+            for (String token : query.searchEnchantments()) {
+                where.append(" OR enchantments LIKE ? ESCAPE '!'");
+                params.add("%" + escapeLike(token) + "%");
+            }
+            where.append(")");
         }
         return where.toString();
     }
@@ -622,7 +677,8 @@ public final class AuctionDatabase {
                 rs.getDouble("current_bid"),
                 topBidder == null ? null : UUID.fromString(topBidder),
                 rs.getString("top_bidder_name"),
-                rs.getInt("bid_count"));
+                rs.getInt("bid_count"),
+                rs.getString("enchantments"));
     }
 
     static CollectionItem mapCollection(ResultSet rs) throws SQLException {

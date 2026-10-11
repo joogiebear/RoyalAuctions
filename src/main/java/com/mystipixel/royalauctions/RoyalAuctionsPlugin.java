@@ -12,6 +12,7 @@ import com.mystipixel.royalauctions.hooks.AuctionPlaceholderExpansion;
 import com.mystipixel.royalauctions.hooks.EcoHook;
 import com.mystipixel.royalauctions.hooks.VaultHook;
 import com.mystipixel.royalauctions.message.MessageManager;
+import com.mystipixel.royalauctions.search.SearchTerms;
 import com.mystipixel.royalauctions.service.AuctionService;
 import com.mystipixel.royalauctions.service.Workers;
 import net.milkbowl.vault.economy.Economy;
@@ -19,6 +20,13 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.ServiceRegisterEvent;
 import org.bukkit.event.server.ServiceUnregisterEvent;
+import io.papermc.paper.registry.RegistryAccess;
+import io.papermc.paper.registry.RegistryKey;
+import org.bukkit.enchantments.Enchantment;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -133,6 +141,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         this.textInput = new TextInput(this, messages);
         getServer().getPluginManager().registerEvents(textInput, this);
         this.guiManager = new GuiManager(this, service, config, categories, tiers, messages, vault, menus, textInput);
+        loadSearchTerms();
 
         getServer().getPluginManager().registerEvents(new AuctionGuiListener(guiManager), this);
         var notifier = new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault, workers);
@@ -158,6 +167,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskLater(this, () -> {
             categories.auditCustomItems();
             service.repairAllCategories();
+            service.backfillEnchantmentIndex();
         }, 100L);
 
         if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
@@ -293,11 +303,22 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
             return; // /ah is not registered until then, but keep this safe to call regardless
         }
         menus.reload();
+        loadSearchTerms();
         scheduleExpiryTask();
         schedulePruneTask();
         categories.auditCustomItems();
         // Categories may have been renamed: refile listings whose category id no longer exists.
         service.repairAllCategories();
+    }
+
+    // Registry read here on the main thread; the language files are read on a worker.
+    private void loadSearchTerms() {
+        List<String> enchantments = new ArrayList<>();
+        for (Enchantment enchantment : RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT)) {
+            enchantments.add(enchantment.getKey().toString());
+        }
+        File dir = new File(getDataFolder(), "lang");
+        workers.async(() -> guiManager.searchTerms().load(SearchTerms.readLanguageFiles(dir, getLogger()), enchantments));
     }
 
     private void validateConfig() {

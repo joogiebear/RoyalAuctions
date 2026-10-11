@@ -46,6 +46,8 @@ expiry:
   expired-notify: "{prefix}&e{count} &7of your listings expired and were returned to &f/ah collect&7."
 
 search:
+  # Help line for /ah search in /ah help.
+  help: "&e/ah search <query> &7- search by name or enchantment"
   prompt: "{prefix}&eType your search in chat, or type &fcancel&e to go back."
   cancelled: "{prefix}&7Search cancelled."
 
@@ -187,8 +189,8 @@ gui:
   # Text input dialog: the first line of each pair is the title, the second sits under it.
   # (The key is still "sign" so existing translations keep working.)
   sign:
-    search-1: "Search by name"
-    search-2: "blank = show all"
+    search-1: "Search by name or enchantment"
+    search-2: "e.g. sharpness V, blank = show all"
     price-1: "Enter a price"
     price-2: "in numbers"
     bid-1: "Enter your bid"

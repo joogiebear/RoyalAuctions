@@ -17,6 +17,7 @@ Part of a suite with [RoyalBank](https://github.com/joogiebear/RoyalBank),
 - [Commands](#commands)
 - [Permissions](#permissions)
 - [Menus](#menus)
+- [Searching](#searching)
 - [Categories](#categories)
 - [Item tiers](#item-tiers)
 - [Confirmations](#confirmations)
@@ -60,7 +61,7 @@ Base command `/auctionhouse`, aliases **`/ah`**, `/auctions`, `/auction`.
 | `/ah browse` | Straight to the browser |
 | `/ah bids` | Auctions you have bid on ("top bidder on X of Y") |
 | `/ah sell` *(or `create`)* | Create-auction flow |
-| `/ah search <query>` | Search listings by name |
+| `/ah search <query>` | Search listings by name or enchantment |
 | `/ah listings` | Manage your own listings |
 | `/ah collect` | Claim purchases and returned items |
 | `/ah <username>` | View that player's active auctions |
@@ -159,6 +160,29 @@ whole list rather than just the current value:
 > item: 'hopper name:"&eSort: &f%sort%"'    # quoted — correct
 > item: hopper name:"&eSort: &f%sort%"      # BREAKS the file
 > ```
+
+---
+
+## Searching
+
+A search matches a listing when its name contains the text, or when the item carries an enchantment
+the text names. Add a level to match only that level, as a number or a Roman numeral up to X:
+`sharpness`, `sharp`, `silk touch`, `sharpness 5`, `sharpness V`, `minecraft:sharpness`. Applied
+enchantments and enchanted books both count; lore does not. Enchantment names of 3 letters or more
+match partially (`prot` finds every protection enchantment); shorter text only matches an exact id.
+
+**Other languages.** The server only knows English names, so a search for what a French player sees
+(`casque`, `tranchant`) finds nothing by default. Copy Minecraft language files into
+`plugins/RoyalAuctions/lang/` and run `/ah reload`. For `fr_fr.json`: in a client's
+`.minecraft/assets/indexes/<version>.json`, look up `minecraft/lang/fr_fr.json` and copy the file
+under `assets/objects/` that its hash names. Searches then also match unnamed vanilla items and
+enchantments by their name in any loaded language, ignoring case and accents. Items renamed by the
+seller are matched on that name, as before.
+
+**Upgrading.** Enchantments are stored with each listing when it is created, in the `enchantments`
+column of `ra_listings` (added automatically). Listings created before this version are indexed once,
+in the background, about five seconds after startup; until that finishes, some of them may not show up
+in enchantment searches.
 
 ---
 

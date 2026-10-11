@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -46,7 +47,7 @@ class SchemaMigrationTest {
 
     @Test void freshInstallHasEveryListingColumn() throws Exception {
         open().close();
-        assertTrue(listingColumns().containsAll(Set.of("tier", "type", "current_bid", "top_bidder_id", "top_bidder_name", "bid_count")));
+        assertTrue(listingColumns().containsAll(Set.of("tier", "type", "current_bid", "top_bidder_id", "top_bidder_name", "bid_count", "enchantments")));
     }
 
     @Test void upgradesPreBiddingDatabaseAndNormalisesStoredIds() throws Exception {
@@ -60,10 +61,13 @@ class SchemaMigrationTest {
         }
         var db = open();
         try {
-            assertTrue(listingColumns().containsAll(Set.of("tier", "type", "current_bid", "top_bidder_id", "top_bidder_name", "bid_count")));
+            assertTrue(listingColumns().containsAll(Set.of("tier", "type", "current_bid", "top_bidder_id", "top_bidder_name", "bid_count", "enchantments")));
             Listing upgraded = db.getListing(id).orElseThrow();
             assertEquals("weapons", upgraded.category());
             assertEquals(ListingType.BIN, upgraded.type());
+            assertNull(upgraded.enchantmentIndex(), "old rows are left for the enchantment backfill");
+            assertEquals(List.of(id.toString()), db.listingsWithoutEnchantmentIndex("", 10).stream()
+                    .map(AuctionDatabase.StoredItem::id).toList());
             // The browse filter compares exactly, so casing from the menu must not matter.
             assertEquals(1, db.browse(new ListingQuery("Weapons", null, null, null, SortOrder.NEWEST), 0, 10).total());
         } finally {
