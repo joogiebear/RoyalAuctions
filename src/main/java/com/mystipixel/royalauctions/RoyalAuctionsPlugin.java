@@ -144,7 +144,7 @@ public final class RoyalAuctionsPlugin extends JavaPlugin {
         loadSearchTerms();
 
         getServer().getPluginManager().registerEvents(new AuctionGuiListener(guiManager), this);
-        var notifier = new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault, workers);
+        var notifier = new com.mystipixel.royalauctions.service.OfflineEventNotifier(this, database, messages, vault, config, workers);
         getServer().getPluginManager().registerEvents(notifier, this);
         service.eventNotifier(notifier::notifyOnline);
 
